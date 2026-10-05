@@ -22,3 +22,15 @@
 - [ ] Controlled canary/live transfer and production rollback rehearsal.
 
 These items cannot be truthfully completed from repository access alone. No infrastructure purchase/provisioning, credential mutation, bank certification, or real-money transfer is performed without the required external access and explicit authorization.
+
+## Final repository verification
+- [x] Full project review completed; identified tenant-RLS write/FK gaps, readiness false-positive, Phase 6 checklist inconsistency and CI syntax issue were corrected.
+- [x] TypeScript strict typecheck passed.
+- [x] 83/83 tests across 35 files passed.
+- [x] ESLint source verification passed.
+- [x] npm production dependency audit: 0 vulnerabilities.
+- [x] Next.js 16.3.8 production build passed.
+
+**Repository gate result:** PASS on 2026-10-05.
+
+**Production go-live gate:** BLOCKED_EXTERNAL until every unchecked external-evidence item above is actually verified. This is intentional fail-closed behavior, not an application test failure.
