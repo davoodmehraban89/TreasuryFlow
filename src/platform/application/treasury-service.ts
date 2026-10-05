@@ -142,5 +142,11 @@ export class TreasuryService{
     }).payments.find(x=>x.tenantId===this.actor.tenantId&&x.id===id)!;
   }
 
+  queuePayment(id:string){
+    const payment=this.getPayment(id);
+    if(payment.state!=='APPROVED'||payment.approvedVersion!==payment.version) throw new Error('payment not eligible for queue');
+    return this.changeState(id,transitionPayment(payment.state,'QUEUE'),'PAYMENT_QUEUED');
+  }
+
   getDashboard(){return dashboard(this.actor.tenantId,this.listPayments())}
 }
