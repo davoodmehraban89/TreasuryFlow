@@ -1,0 +1,2 @@
+﻿import {describe,expect,it} from 'vitest';import {InMemoryOperationsRepository,getDashboard} from './dashboard-service';
+describe('dashboard service',()=>{it('returns only request tenant data',async()=>{const repo=new InMemoryOperationsRepository([{tenantId:'t1',state:'UNKNOWN',amountIrr:100},{tenantId:'t2',state:'SETTLED',amountIrr:900}]);expect(await getDashboard({userId:'u1',tenantId:'t1',roles:['MAKER']},repo)).toEqual({total:1,totalIrr:100,unknown:1,settled:0,needsReview:0})})});
