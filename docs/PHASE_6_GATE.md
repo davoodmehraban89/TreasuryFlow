@@ -10,9 +10,10 @@
 - [x] Readiness endpoint added with bank adapter explicitly disabled.
 - [x] Runtime configuration rejects insecure production URL and unauthorized live-bank mode.
 - [x] CI expanded to all phase/release branches with schema and committed-secret checks.
-- [ ] Fresh full verification and branch push.
+- [x] Fresh full verification and branch push completed; see Phase 6 final commit ecee423.
 
 ## Boundary
 Phase 6 provides repository-level production platform contracts and migration artifacts. It does not claim a provisioned PostgreSQL instance, configured external identity provider, KMS/SIEM/WAF, completed restore drill, or a bank-specific production connection. Those are Phase 7 and require external infrastructure/credentials and explicit authorization where applicable.
 
 **Gate result:** PASS locally on 2026-10-05. Phase 6 repository-level production platform foundation is complete within its stated boundary.
+
