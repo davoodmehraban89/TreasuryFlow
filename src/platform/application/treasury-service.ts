@@ -173,6 +173,18 @@ export class TreasuryService{
     }).payments.find(x=>x.tenantId===this.actor.tenantId&&x.id===id)!;
   }
 
+  async pollPaymentStatus(id:string,adapter:BankAdapter){
+    const payment=this.getPayment(id);
+    if(payment.state!=='SUBMITTED'||!payment.bankReference) throw new Error('payment not eligible for polling');
+    const outcome=await adapter.poll(payment.bankReference);
+    if(outcome==='ACCEPTED'||outcome==='SUBMITTED'){
+      this.appendAudit('PAYMENT_BANK_'+outcome,id);
+      return this.getPayment(id);
+    }
+    if(outcome==='REJECTED') return this.changeState(id,transitionPayment(payment.state,'FAIL'),'PAYMENT_BANK_REJECTED');
+    return this.changeState(id,transitionPayment(payment.state,'UNKNOWN_RESULT'),'PAYMENT_BANK_UNKNOWN');
+  }
+
   getDashboard(){return dashboard(this.actor.tenantId,this.listPayments())}
 }
 
