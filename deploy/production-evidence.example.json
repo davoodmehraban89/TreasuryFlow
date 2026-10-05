@@ -1,0 +1,9 @@
+﻿{
+  "database":{"endpointId":"__EVIDENCE_REF__","migration":"001_production_core.sql","rlsProof":"__EVIDENCE_REF__"},
+  "identity":{"providerId":"__EVIDENCE_REF__","mfaProof":"__EVIDENCE_REF__","sessionProof":"__EVIDENCE_REF__"},
+  "kms":{"keyId":"__EVIDENCE_REF__","policyProof":"__EVIDENCE_REF__"},
+  "security":{"wafPolicyId":"__EVIDENCE_REF__","siemPolicyId":"__EVIDENCE_REF__","alertDeliveryProof":"__EVIDENCE_REF__"},
+  "recovery":{"restoreDrillId":"__EVIDENCE_REF__","rpoMinutes":15,"rtoMinutes":60,"integrityProof":"__EVIDENCE_REF__"},
+  "bank":{"provider":"__EVIDENCE_REF__","protocol":"__EVIDENCE_REF__","sandboxProof":"__EVIDENCE_REF__","certificationRef":"__EVIDENCE_REF__","productionCertificateFingerprint":"__EVIDENCE_REF__"},
+  "release":{"liveAuthorizationRef":"__EVIDENCE_REF__","canaryProof":"__EVIDENCE_REF__","rollbackProof":"__EVIDENCE_REF__"}
+}
