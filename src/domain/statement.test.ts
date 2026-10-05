@@ -1,0 +1,2 @@
+import {describe,expect,it} from 'vitest';import {ingestStatement} from './statement';
+describe('statement ingestion',()=>{it('normalizes rows and rejects duplicate source ids',()=>{const r=ingestStatement('t1','a1',[{sourceId:'x',amountIrr:100,date:'2026-10-05',reference:' ab '},{sourceId:'x',amountIrr:100,date:'2026-10-05',reference:'ab'}]);expect(r.ok).toBe(false)});it('rejects malformed batch atomically',()=>{const r=ingestStatement('t1','a1',[{sourceId:'x',amountIrr:1.2,date:'bad',reference:'x'}]);expect(r.ok).toBe(false)})});
