@@ -1,0 +1,3 @@
+export type ExternalSqlServerConfig={server:string;database:string;auth:'windows'|'sql';user?:string;password?:string;encrypt?:boolean;trustServerCertificate?:boolean};
+export function validateExternalSqlServerConfig(config:ExternalSqlServerConfig){const errors:string[]=[];if(!config.server.trim())errors.push('server');if(!config.database.trim())errors.push('database');if(config.auth==='sql'&&(!config.user?.trim()||!config.password))errors.push('credentials');return errors}
+export function buildSqlServerReadModelPolicy(options?:{approvedWriteContract?:string}){const approved=Boolean(options?.approvedWriteContract);return {readOnly:!approved,allowArbitraryWrite:false,allowStoredProcedureWrite:approved,approvedWriteContract:options?.approvedWriteContract??null} as const}
