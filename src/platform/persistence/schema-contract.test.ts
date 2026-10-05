@@ -1,0 +1,3 @@
+﻿import {describe,expect,it} from 'vitest'; import {verifyProductionSchema} from './schema-contract';
+const schema=`CREATE TABLE tenants; CREATE TABLE users; CREATE TABLE bank_accounts; CREATE TABLE beneficiaries; CREATE TABLE payments; CREATE TABLE approvals; CREATE TABLE bank_statements; CREATE TABLE audit_events; ALTER TABLE payments ENABLE ROW LEVEL SECURITY; CREATE POLICY payments_tenant ON payments; UNIQUE (tenant_id, idempotency_key);`;
+describe('production schema contract',()=>{it('requires core tables, payment RLS and tenant idempotency uniqueness',()=>expect(verifyProductionSchema(schema)).toEqual([]));it('reports unsafe schema',()=>expect(verifyProductionSchema('CREATE TABLE payments;')).toContain('payments-rls'))});

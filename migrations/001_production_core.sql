@@ -1,0 +1,18 @@
+﻿BEGIN;
+CREATE TABLE tenants (id text PRIMARY KEY, name text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE users (id text PRIMARY KEY, tenant_id text NOT NULL REFERENCES tenants(id), role text NOT NULL CHECK(role IN ('MAKER','CHECKER','TREASURY_ADMIN','AUDITOR')), active boolean NOT NULL DEFAULT true);
+CREATE TABLE bank_accounts (id text PRIMARY KEY, tenant_id text NOT NULL REFERENCES tenants(id), iban text NOT NULL, name text NOT NULL, UNIQUE(tenant_id, iban));
+CREATE TABLE beneficiaries (id text PRIMARY KEY, tenant_id text NOT NULL REFERENCES tenants(id), iban text NOT NULL, name text NOT NULL, whitelisted boolean NOT NULL DEFAULT false, UNIQUE(tenant_id, iban));
+CREATE TABLE payments (id text PRIMARY KEY, tenant_id text NOT NULL REFERENCES tenants(id), maker_id text NOT NULL REFERENCES users(id), beneficiary_id text NOT NULL REFERENCES beneficiaries(id), source_account_id text NOT NULL REFERENCES bank_accounts(id), amount_irr bigint NOT NULL CHECK(amount_irr>=0), payment_date date NOT NULL, client_reference text NOT NULL, idempotency_key text NOT NULL, state text NOT NULL, version integer NOT NULL DEFAULT 1, UNIQUE (tenant_id, idempotency_key));
+CREATE TABLE approvals (id text PRIMARY KEY, tenant_id text NOT NULL REFERENCES tenants(id), payment_id text NOT NULL REFERENCES payments(id), checker_id text NOT NULL REFERENCES users(id), approved_version integer NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE bank_statements (id text PRIMARY KEY, tenant_id text NOT NULL REFERENCES tenants(id), bank_account_id text NOT NULL REFERENCES bank_accounts(id), source_record_id text NOT NULL, amount_irr bigint NOT NULL, occurred_at timestamptz NOT NULL, reference text, UNIQUE(tenant_id,bank_account_id,source_record_id));
+CREATE TABLE audit_events (sequence bigserial PRIMARY KEY, tenant_id text NOT NULL REFERENCES tenants(id), actor_id text, action text NOT NULL, entity_type text NOT NULL, entity_id text NOT NULL, payload jsonb NOT NULL DEFAULT '{}'::jsonb, created_at timestamptz NOT NULL DEFAULT now());
+ALTER TABLE users ENABLE ROW LEVEL SECURITY; ALTER TABLE bank_accounts ENABLE ROW LEVEL SECURITY; ALTER TABLE beneficiaries ENABLE ROW LEVEL SECURITY; ALTER TABLE payments ENABLE ROW LEVEL SECURITY; ALTER TABLE approvals ENABLE ROW LEVEL SECURITY; ALTER TABLE bank_statements ENABLE ROW LEVEL SECURITY; ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY users_tenant ON users USING (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY bank_accounts_tenant ON bank_accounts USING (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY beneficiaries_tenant ON beneficiaries USING (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY payments_tenant ON payments USING (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY approvals_tenant ON approvals USING (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY bank_statements_tenant ON bank_statements USING (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY audit_events_tenant ON audit_events USING (tenant_id = current_setting('app.tenant_id', true));
+COMMIT;
