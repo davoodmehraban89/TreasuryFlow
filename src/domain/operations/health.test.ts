@@ -1,0 +1,2 @@
+import {describe,expect,it} from 'vitest'; import {evaluateHealth,EmergencyStop} from './health';
+describe('health and emergency stop',()=>{it('marks stale signal degraded',()=>expect(evaluateHealth({lastSeenMs:1000,nowMs:7001,maxAgeMs:5000})).toBe('DEGRADED'));it('blocks dispatch while stop enabled and is reversible',()=>{const s=new EmergencyStop();expect(s.canDispatch()).toBe(true);s.enable('admin','incident');expect(s.canDispatch()).toBe(false);s.disable('admin','resolved');expect(s.canDispatch()).toBe(true);expect(s.events).toHaveLength(2)})});

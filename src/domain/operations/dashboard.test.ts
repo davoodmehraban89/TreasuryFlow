@@ -1,0 +1,2 @@
+import {describe,expect,it} from 'vitest'; import {dashboard} from './dashboard';
+describe('operations dashboard',()=>{it('aggregates tenant queues only',()=>{const r=dashboard('t1',[{tenantId:'t1',state:'UNKNOWN',amountIrr:100},{tenantId:'t1',state:'SETTLED',amountIrr:200},{tenantId:'t2',state:'UNKNOWN',amountIrr:999}]);expect(r).toEqual({total:2,totalIrr:300,unknown:1,settled:1,needsReview:0})})});

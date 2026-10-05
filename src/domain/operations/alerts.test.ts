@@ -1,0 +1,2 @@
+import {describe,expect,it} from 'vitest'; import {deriveAlerts} from './alerts';
+describe('operational alerts',()=>{it('derives deterministic unique alerts',()=>{const a=deriveAlerts({unknown:2,needsReview:1,health:'DEGRADED',queueDepth:101});expect(a.map(x=>x.code)).toEqual(['BANK_HEALTH_DEGRADED','UNKNOWN_PAYMENTS','RECONCILIATION_REVIEW','QUEUE_BACKLOG']);expect(new Set(a.map(x=>x.code)).size).toBe(a.length)});it('returns none when healthy',()=>expect(deriveAlerts({unknown:0,needsReview:0,health:'HEALTHY',queueDepth:3})).toEqual([]))});
