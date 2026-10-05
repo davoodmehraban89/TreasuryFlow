@@ -14,7 +14,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - run: npm ci`n      - run: npm audit --omit=dev --audit-level=high
       - run: npm run typecheck
       - run: npm test -- --reporter=dot
       - run: npx eslint src --no-cache
@@ -25,3 +25,4 @@ jobs:
         run: |
           if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.production\.example$'; then exit 1; fi
       - run: npm run build
+
