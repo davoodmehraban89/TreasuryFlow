@@ -1,27 +1,31 @@
 {
-    "name":  "treasuryflow",
-    "version":  "0.1.0",
-    "private":  true,
-    "scripts":  {
-                    "typecheck":  "tsc --noEmit",
-                    "test":  "vitest run",
-                    "lint":  "eslint .",
-                    "build":  "next build",
-                    "dev":  "next dev",
-                    "start":  "next start"
-                },
-    "dependencies":  {
-                         "react":  "19.2.0",
-                         "react-dom":  "19.2.0",
-                         "next":  "16.3.8"
-                     },
-    "devDependencies":  {
-                            "@types/node":  "^24.0.0",
-                            "@types/react":  "^19.0.0",
-                            "@types/react-dom":  "^19.0.0",
-                            "eslint":  "^9.0.0",
-                            "typescript":  "^5.9.0",
-                            "vitest":  "^3.2.4",
-                            "eslint-config-next":  "16.3.8"
-                        }
+  "name": "treasuryflow",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "build": "next build",
+    "dev": "next dev",
+    "start": "next start",
+    "smoke": "node scripts/smoke.mjs",
+    "verify:external-evidence": "node scripts/check-production-evidence.mjs"
+  },
+  "dependencies": {
+    "next": "16.3.8",
+    "pg": "^8.23.1",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "16.3.8",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.4"
+  }
 }
