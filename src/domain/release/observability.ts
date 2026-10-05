@@ -1,0 +1,1 @@
+const sensitive=new Set(['iban','accountNumber','cardNumber','token','secret','password']);export function redactTelemetry(input:Record<string,unknown>){return Object.fromEntries(Object.entries(input).map(([k,v])=>[k,sensitive.has(k)?'[REDACTED]':v]))}

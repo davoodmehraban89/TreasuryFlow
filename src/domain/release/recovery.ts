@@ -1,0 +1,1 @@
+export type RestorePoint={id:string;createdAt:number;verified:boolean};export function selectRestorePoint(points:RestorePoint[],before:number){return points.filter(x=>x.verified&&x.createdAt<=before).sort((a,b)=>b.createdAt-a.createdAt)[0]};export function rollbackEligible(p:RestorePoint){return p.verified}

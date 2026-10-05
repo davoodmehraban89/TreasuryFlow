@@ -1,0 +1,2 @@
+import {describe,expect,it} from 'vitest'; import {selectRestorePoint,rollbackEligible} from './recovery';
+describe('recovery',()=>{const points=[{id:'b1',createdAt:100,verified:true},{id:'b2',createdAt:200,verified:false},{id:'b3',createdAt:150,verified:true}];it('selects latest verified point before incident',()=>expect(selectRestorePoint(points,180)?.id).toBe('b3'));it('rejects unverified rollback',()=>expect(rollbackEligible(points[1])).toBe(false))});

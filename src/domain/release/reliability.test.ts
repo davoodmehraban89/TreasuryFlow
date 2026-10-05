@@ -1,0 +1,1 @@
+import {describe,expect,it} from 'vitest';import {reliabilityDecision} from './reliability';describe('reliability boundaries',()=>{it('never retries UNKNOWN',()=>expect(reliabilityDecision('UNKNOWN',1)).toBe('REVIEW'));it('caps safe retries',()=>{expect(reliabilityDecision('TRANSIENT',0)).toBe('RETRY');expect(reliabilityDecision('TRANSIENT',3)).toBe('FAIL')})});

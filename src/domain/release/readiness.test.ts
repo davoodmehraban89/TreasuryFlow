@@ -1,0 +1,2 @@
+import {describe,expect,it} from 'vitest'; import {evaluateRelease} from './readiness';
+describe('release readiness',()=>{const ok={tests:true,typecheck:true,lint:true,build:true,securityReview:true,backupRestore:true,criticalDefects:0};it('passes complete evidence',()=>expect(evaluateRelease(ok)).toEqual({ready:true,reasons:[]}));it('blocks missing evidence and critical defects',()=>expect(evaluateRelease({...ok,securityReview:false,criticalDefects:1})).toEqual({ready:false,reasons:['security-review','critical-defects']}))});

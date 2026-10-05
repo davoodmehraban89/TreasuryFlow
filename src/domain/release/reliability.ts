@@ -1,0 +1,1 @@
+export function reliabilityDecision(outcome:'UNKNOWN'|'TRANSIENT'|'SUCCESS',attempt:number){if(outcome==='UNKNOWN')return 'REVIEW' as const;if(outcome==='SUCCESS')return 'DONE' as const;return attempt<3?'RETRY' as const:'FAIL' as const}
