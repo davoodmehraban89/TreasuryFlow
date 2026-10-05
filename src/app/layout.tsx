@@ -1,1 +1,2 @@
-export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="fa" dir="rtl"><body>{children}</body></html>}
+import './globals.css';
+export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="fa" dir="rtl"><body><header><strong>TreasuryFlow</strong><span>مرکز عملیات خزانه‌داری</span></header><nav aria-label="ناوبری اصلی"><a href="#dashboard">داشبورد</a><a href="#payments">پرداخت‌ها</a><a href="#approvals">تأییدها</a><a href="#accounts">حساب‌های بانکی</a><a href="#beneficiaries">ذی‌نفعان</a><a href="#audit">ممیزی</a></nav>{children}</body></html>}
