@@ -1,0 +1,2 @@
+﻿import {describe,expect,it} from 'vitest';import {renderToStaticMarkup} from 'react-dom/server';import {AuditTable} from './components';
+describe('audit explorer UI',()=>{it('renders audit entries read only',()=>{const html=renderToStaticMarkup(<AuditTable rows={[{tenantId:'t1',seq:1,actor:'maker',action:'PAYMENT_CREATED',entity:'p1',at:1}]}/>);expect(html).toContain('PAYMENT_CREATED');expect(html).toContain('maker');expect(html).not.toContain('<button')})});
