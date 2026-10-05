@@ -1,0 +1,2 @@
+import {describe,expect,it} from 'vitest'; import {canApprove,isApprovalValid} from './approval-policy';
+describe('approval policy',()=>{it('rejects maker self approval',()=>expect(canApprove({actorId:'u1',makerId:'u1'},2)).toBe(false));it('allows distinct checker',()=>expect(canApprove({actorId:'u2',makerId:'u1'},2)).toBe(true));it('binds approval to payment version',()=>{expect(isApprovalValid({approvedVersion:2},2)).toBe(true);expect(isApprovalValid({approvedVersion:2},3)).toBe(false)})});

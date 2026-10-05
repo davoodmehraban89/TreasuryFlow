@@ -1,0 +1,2 @@
+import {describe,expect,it} from 'vitest'; import {logicalPaymentKey,decideDuplicate} from './idempotency';
+describe('idempotency',()=>{const p={tenantId:'t1',sourceAccountId:'a1',beneficiaryId:'b1',amountIrr:1000,paymentDate:'2026-10-05',clientReference:'REF-1'};it('is deterministic',()=>expect(logicalPaymentKey(p)).toBe(logicalPaymentKey({...p})));it('changes for material identity',()=>expect(logicalPaymentKey(p)).not.toBe(logicalPaymentKey({...p,amountIrr:1001})));it('rejects duplicate',()=>expect(decideDuplicate('k',new Set(['k']))).toBe('REJECT_DUPLICATE'))});

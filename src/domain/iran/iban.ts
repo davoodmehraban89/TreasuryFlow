@@ -1,0 +1,1 @@
+export function validateIranianIban(input:string){const iban=input.replace(/\s+/g,'').toUpperCase(); if(!/^IR\d{24}$/.test(iban)) return false; const rearranged=iban.slice(4)+iban.slice(0,4); let rem=0; for(const ch of rearranged){const s=/\d/.test(ch)?ch:String(ch.charCodeAt(0)-55); for(const d of s) rem=(rem*10+Number(d))%97;} return rem===1;}

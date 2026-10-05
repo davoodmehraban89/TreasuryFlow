@@ -1,0 +1,2 @@
+# Persistence contract: logical payment idempotency
+The authoritative PostgreSQL payments table MUST persist a non-null `idempotency_key` (SHA-256 hex) and enforce a UNIQUE constraint scoped to tenant. Creation and submission MUST execute in a transaction and treat unique-constraint conflict as `REJECT_DUPLICATE`; it MUST NOT create or dispatch a second transfer. Raw beneficiary/account identifiers are never written into the key or logs; only the digest may be logged.

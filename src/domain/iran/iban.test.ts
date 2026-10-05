@@ -1,0 +1,2 @@
+import { describe,expect,it } from 'vitest'; import { validateIranianIban } from './iban';
+describe('Iran IBAN',()=>{it('accepts checksum-valid IR IBAN',()=>expect(validateIranianIban('IR062960000000100324200001')).toBe(true));it('rejects bad checksum/country',()=>{expect(validateIranianIban('IR062960000000100324200002')).toBe(false);expect(validateIranianIban('DE89370400440532013000')).toBe(false)})});
