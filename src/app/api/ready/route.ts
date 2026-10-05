@@ -1,1 +1,1 @@
-﻿import {NextResponse} from 'next/server';export async function GET(){return NextResponse.json({status:'ready',bankAdapter:'disabled'},{status:200})}
+﻿import {NextResponse} from 'next/server';import {readiness} from '../../../platform/readiness';export async function GET(){const result=readiness(process.env);return NextResponse.json({status:result.ready?'ready':'not-ready',bankAdapter:result.bankAdapter,missing:result.missing},{status:result.ready?200:503})}
