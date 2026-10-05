@@ -1,16 +1,19 @@
 # Production Runbook
 
 ## Release
-1. Require Phase 5 gate PASS and zero unresolved critical defects.
-2. Inject secrets only from the runtime secret store; keep BANK_LIVE_MODE=false unless separately authorized.
-3. Create and verify a restore point before deployment.
-4. Deploy an immutable build artifact and verify application health before traffic cutover.
+1. Require the Phase 5 release gate to be READY.
+2. Inject secrets from the target platform secret store; do not copy secrets into files or logs.
+3. Keep `BANK_ADAPTER_MODE=disabled` unless live-bank activation has separate explicit authorization.
+4. Deploy the immutable release artifact and verify application health before routing traffic.
 
-## Rollback and recovery
-Rollback to the last known-good immutable artifact. Data restoration may use only the latest verified restore point strictly before the incident. Never restore an unverified backup.
+## Rollback
+Rollback only to a previously verified immutable release. If a data restore is required, select the latest verified restore point before the incident, preserve incident evidence, restore in an isolated environment first, then verify integrity before cutover.
 
-## Recovery objectives
-Target RPO: 15 minutes after persistent storage exists. Target RTO: 60 minutes. These are readiness targets, not measured production guarantees until real infrastructure is deployed and tested.
+## Backup / DR objectives
+Target policy for production planning: RPO <= 15 minutes and RTO <= 60 minutes. These are readiness objectives, not evidence that a production database currently exists or has been restored. A real deployment must prove them with scheduled restore drills.
 
-## Live banking prohibition
-Live bank credentials, endpoints, certificates and real-transfer activation are outside this release gate and require explicit authorization plus bank-specific security review.
+## Incident handling
+Emergency Stop blocks new dispatch. UNKNOWN transfer outcomes go to manual review and are never automatically retried. Preserve audit history and avoid logging raw IBAN/account/card values or credentials.
+
+## Live-bank prohibition
+This release package does not authorize or claim a live bank connection, production bank credentials, or real transfer execution. Activation is a separate controlled change.

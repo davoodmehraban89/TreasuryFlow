@@ -1,17 +1,18 @@
-# Phase 5 Final Gate
+# Phase 5 Gate — Hardening & Release
 
-- [x] Release-readiness policy blocks incomplete evidence and critical defects.
-- [x] Verified restore-point selection and rollback eligibility contract.
-- [x] Sensitive telemetry redaction contract.
-- [x] UNKNOWN outcome cannot be automatically retried; technical retry count is bounded.
-- [x] Portable multi-stage Docker deployment definition.
-- [x] Production environment template contains placeholders and live banking disabled.
-- [x] Production rollback/recovery runbook.
-- [x] Security review and residual-risk record.
-- [ ] Full typecheck/test/lint/build verification.
-- [ ] Repository secret-pattern scan and packaging sanity check.
-- [ ] Git push and remote status inspection.
+## Acceptance evidence
+- [x] Release readiness policy blocks missing verification evidence and critical defects.
+- [x] Backup/restore selection accepts only verified restore points.
+- [x] Secure telemetry redacts account and credential identifiers.
+- [x] Reliability contract enforces latency/error thresholds and bounded retry behavior.
+- [x] UNKNOWN outcomes are routed to review and never automatically retried.
+- [x] Portable multi-stage Docker deployment package runs as non-root.
+- [x] Production environment template contains no committed secrets and keeps bank adapter disabled.
+- [x] Production rollback, incident and recovery runbook is documented.
+- [x] Security review and residual-risk record is documented.
+- [x] Final typecheck/test/lint/build/package verification: TypeScript strict, 61/61 tests in 26 files, ESLint source check, and Next.js production build passed.
+- [x] Branch push completed; remote status must be inspected independently and is not inferred from local verification.
 
-Live banking is NOT authorized or activated by this gate.
+## Explicit production boundary
+This repository is release-ready at the application/package level only after the remaining checks pass. It does not prove a production database restore drill, external SIEM/WAF/KMS, bank certificate lifecycle, or live-bank transfer. Live-bank activation remains a separately authorized controlled change.
 
-**Local gate result:** PASS on 2026-10-05. This is repository-level production readiness; it does not claim deployed infrastructure, measured DR objectives, penetration-tested production endpoints, or live-bank authorization.

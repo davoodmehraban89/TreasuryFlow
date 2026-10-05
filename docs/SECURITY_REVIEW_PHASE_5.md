@@ -1,9 +1,8 @@
 # Security Review — Phase 5
-- Runtime-only secrets; repository templates contain placeholders.
-- Sensitive telemetry fields are redacted by contract.
-- Maker/checker and emergency-stop authorization invariants remain enforced.
-- UNKNOWN financial outcomes never enter automatic retry.
-- Only verified restore points are rollback-eligible.
-- Live banking is disabled and excluded from release authorization.
-
-Residual risks requiring actual production infrastructure: database-level constraints, production identity provider, KMS/HSM, SIEM, measured RPO/RTO, penetration testing against deployed endpoints, and bank-specific certificate/protocol controls.
+- Secrets: runtime secret store only; `.env.production.example` contains placeholders only.
+- Financial identifiers: telemetry redaction contract covers IBAN/account/card and credential keys.
+- Authorization: existing maker/checker separation and emergency-stop authorization remain mandatory.
+- Dispatch: stable idempotency and UNKNOWN manual-review invariant remain mandatory.
+- Supply chain: lockfile-based `npm ci` is required by CI/container build.
+- Container: runtime executes as non-root `node` user.
+- Residual risks: no production database, KMS/HSM, SIEM, WAF, real bank certificate lifecycle or restore drill is claimed in this repository-only phase.
