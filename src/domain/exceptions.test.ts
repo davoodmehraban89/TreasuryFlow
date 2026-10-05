@@ -1,0 +1,2 @@
+import {describe,expect,it} from 'vitest';import {classifyException,resolveException} from './exceptions';
+describe('bank exceptions',()=>{it('routes unknown and ambiguous to review',()=>{expect(classifyException('UNKNOWN')).toBe('NEEDS_REVIEW');expect(classifyException('AMBIGUOUS')).toBe('NEEDS_REVIEW')});it('requires reason for manual resolution',()=>{expect(()=>resolveException('e1','MATCHED','')).toThrow();expect(resolveException('e1','RETURNED','BANK_RETURN').resolution).toBe('RETURNED')})});
