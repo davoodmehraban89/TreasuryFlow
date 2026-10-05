@@ -1,0 +1,3 @@
+﻿import {describe,expect,it} from 'vitest';import {loadProductionDashboard} from './runtime-dashboard';
+const data=[{tenantId:'t1',state:'SETTLED',amountIrr:500}];
+describe('production dashboard runtime',()=>{it('fails closed without verified request context',async()=>expect(loadProductionDashboard(null,{listPayments:async()=>data})).resolves.toEqual({status:'AUTH_REQUIRED'}));it('loads only through tenant-scoped context',async()=>expect(loadProductionDashboard({userId:'u1',tenantId:'t1',roles:['MAKER']},{listPayments:async tenant=>data.filter(x=>x.tenantId===tenant)})).resolves.toEqual({status:'READY',data:{total:1,totalIrr:500,unknown:0,settled:1,needsReview:0}}))});
