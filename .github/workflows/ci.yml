@@ -1,7 +1,7 @@
-name: TreasuryFlow CI
+﻿name: TreasuryFlow CI
 on:
   push:
-    branches: [main, phase-2-treasury-core]
+    branches: ['main', 'phase-*', 'release-*']
   pull_request:
     branches: [main]
 jobs:
@@ -18,4 +18,10 @@ jobs:
       - run: npm run typecheck
       - run: npm test -- --reporter=dot
       - run: npx eslint src --no-cache
+      - name: Verify production schema contract
+        run: npm test -- --run src/platform/persistence/schema-contract.test.ts
+      - name: Reject committed secret files
+        shell: bash
+        run: |
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.production\.example$'; then exit 1; fi
       - run: npm run build

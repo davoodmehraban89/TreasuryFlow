@@ -1,0 +1,2 @@
+﻿import {describe,expect,it} from 'vitest';import {validateRuntimeConfig} from './runtime-config';
+describe('runtime config',()=>{it('accepts safe disabled-bank production config',()=>expect(validateRuntimeConfig({NODE_ENV:'production',APP_BASE_URL:'https://treasury.example',BANK_ADAPTER_MODE:'disabled'})).toEqual([]));it('blocks unsafe live bank activation and insecure url',()=>{expect(validateRuntimeConfig({NODE_ENV:'production',APP_BASE_URL:'http://x',BANK_ADAPTER_MODE:'live'})).toEqual(['https-required','live-bank-not-authorized'])})});

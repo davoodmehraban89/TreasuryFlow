@@ -1,0 +1,1 @@
+﻿export function validateRuntimeConfig(e:Record<string,string|undefined>){const errors:string[]=[];if(e.NODE_ENV==='production'&&!e.APP_BASE_URL?.startsWith('https://'))errors.push('https-required');if(e.BANK_ADAPTER_MODE==='live')errors.push('live-bank-not-authorized');return errors}
