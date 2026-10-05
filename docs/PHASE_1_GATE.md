@@ -11,7 +11,9 @@
 - [x] Server authorization policy foundation
 - [x] Threat model
 - [x] RTL/UX foundation
-- [x] TypeScript strict typecheck and executable domain test foundation`n- [~] Full web framework build/lint deferred: pinned Next 16.0.0 was rejected after npm security warning; framework version must be reselected against current security guidance before UI implementation.
-- [ ] Git remote push/CI verification
+- [x] TypeScript strict typecheck and executable domain test foundation`n- [x] Next.js 16.3.8 production build and source lint
+- [x] Git remote push verification (CI workflow not yet configured; required in Phase 2 before merge to release)
 
-Phase 1 is not complete until both unchecked items pass.
+Phase 1 gate passed on 2026-10-05: typecheck, 19 domain tests, source lint, production build, and GitHub push were verified. CI workflow is intentionally a Phase 2 pre-merge control.
+
+
