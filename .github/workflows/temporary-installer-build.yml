@@ -1,0 +1,59 @@
+name: Temporary TreasuryFlow Installer Build
+on:
+  push:
+    branches:
+      - transfer-exe-to-drive-20261006
+
+permissions:
+  contents: read
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase-7-production-infrastructure-bank-golive
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify tests
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build app
+        run: npm run build
+
+      - name: Prepare standalone bundle
+        run: node scripts/prepare-standalone.mjs
+
+      - name: Build installable Windows EXE
+        run: npx electron-builder --win nsis --x64 --publish never
+
+      - name: Verify installer
+        shell: powershell
+        run: |
+          $p = 'release\TreasuryFlow-0.1.0-Windows-x64.exe'
+          if (!(Test-Path $p)) { throw 'Installer not found' }
+          $i = Get-Item $p
+          if ($i.Length -lt 100000000) { throw "Installer unexpectedly small: $($i.Length)" }
+          Get-FileHash $p -Algorithm SHA256 | Format-List
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: treasuryflow-installer-transfer
+          path: release/TreasuryFlow-0.1.0-Windows-x64.exe
+          compression-level: 0
+          retention-days: 1
