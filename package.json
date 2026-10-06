@@ -1,71 +1,72 @@
 {
-  "name": "treasuryflow",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "lint": "eslint .",
-    "build": "next build",
-    "dev": "next dev",
-    "start": "next start",
-    "smoke": "node scripts/smoke.mjs",
-    "verify:external-evidence": "node scripts/check-production-evidence.mjs",
-    "desktop:build": "npm run build && node scripts/prepare-standalone.mjs && electron-builder --win portable",
-    "desktop:dir": "npm run build && node scripts/prepare-standalone.mjs && electron-builder --dir"
-  },
-  "dependencies": {
-    "mssql": "^12.7.4",
-    "next": "16.3.8",
-    "pg": "^8.23.1",
-    "react": "19.2.0",
-    "react-dom": "19.2.0"
-  },
-  "devDependencies": {
-    "@types/mssql": "^12.3.0",
-    "@types/node": "^24.0.0",
-    "@types/pg": "^8.23.1",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "electron": "^44.5.1",
-    "electron-builder": "^26.15.3",
-    "eslint": "^9.0.0",
-    "eslint-config-next": "16.3.8",
-    "typescript": "^5.9.0",
-    "vitest": "^3.2.4"
-  },
-  "main": "electron/main.cjs",
-  "build": {
-    "appId": "com.treasuryflow.desktop",
-    "productName": "TreasuryFlow",
-    "asar": true,
-    "files": [
-      "electron/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": ".next/standalone",
-        "to": "standalone"
-      },
-      {
-        "from": ".next/static",
-        "to": "standalone/.next/static"
-      }
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "TreasuryFlow--Windows-."
+    "name": "treasuryflow",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "lint": "eslint .",
+        "build": "next build",
+        "dev": "next dev",
+        "start": "next start",
+        "smoke": "node scripts/smoke.mjs",
+        "verify:external-evidence": "node scripts/check-production-evidence.mjs",
+        "desktop:build": "npm run build && node scripts/prepare-standalone.mjs && electron-builder --win portable",
+        "desktop:dir": "npm run build && node scripts/prepare-standalone.mjs && electron-builder --dir"
     },
-    "directories": {
-      "output": "release"
+    "dependencies": {
+        "mssql": "^12.7.4",
+        "next": "16.3.8",
+        "pg": "^8.23.1",
+        "react": "19.2.0",
+        "react-dom": "19.2.0"
+    },
+    "devDependencies": {
+        "@types/mssql": "^12.3.0",
+        "@types/node": "^24.0.0",
+        "@types/pg": "^8.23.1",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "electron": "^44.5.1",
+        "electron-builder": "^26.15.3",
+        "eslint": "^9.0.0",
+        "eslint-config-next": "16.3.8",
+        "typescript": "^5.9.0",
+        "vitest": "^3.2.4"
+    },
+    "main": "electron/main.cjs",
+    "build": {
+        "appId": "com.treasuryflow.desktop",
+        "productName": "TreasuryFlow",
+        "asar": true,
+        "files": [
+            "electron/**/*",
+            "package.json"
+        ],
+        "extraResources": [
+            {
+                "from": ".next/standalone",
+                "to": "standalone"
+            },
+            {
+                "from": ".next/static",
+                "to": "standalone/.next/static"
+            }
+        ],
+        "win": {
+            "target": [
+                {
+                    "target": "portable",
+                    "arch": [
+                        "x64"
+                    ]
+                }
+            ],
+            "artifactName": "TreasuryFlow-${version}-Windows-${arch}.${ext}"
+        },
+        "directories": {
+            "output": "release"
+        },
+        "artifactName": "TreasuryFlow-${version}-Windows-${arch}.${ext}"
     }
-  }
 }
