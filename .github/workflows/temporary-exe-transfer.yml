@@ -1,0 +1,56 @@
+name: Temporary TreasuryFlow EXE Transfer
+on:
+  push:
+    branches:
+      - transfer-exe-to-drive-20261006
+
+permissions:
+  contents: read
+
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Wait for release asset upload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET_ID: "614671355"
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            state=$(curl -fsSL \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/assets/$ASSET_ID" | jq -r '.state')
+            echo "asset state: $state"
+            if [ "$state" = "uploaded" ]; then
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "Asset did not reach uploaded state in time" >&2
+          exit 1
+
+      - name: Download private release asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET_ID: "614671355"
+        run: |
+          set -euo pipefail
+          curl -fL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/octet-stream" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/assets/$ASSET_ID" \
+            -o TreasuryFlow-0.1.0-Windows-x64.exe
+          test "$(stat -c%s TreasuryFlow-0.1.0-Windows-x64.exe)" -gt 100000000
+
+      - name: Upload transfer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: treasuryflow-exe-transfer
+          path: TreasuryFlow-0.1.0-Windows-x64.exe
+          compression-level: 0
+          retention-days: 1
