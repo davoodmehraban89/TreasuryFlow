@@ -7,6 +7,7 @@ export const PRIMARY_NAV:readonly NavItem[]=[
 {labelFa:'مغایرت‌گیری',href:'/reconciliation',group:'controls',icon:'≋'},
 {labelFa:'صف ارسال',href:'/queue',group:'controls',icon:'↥'},
 {labelFa:'طرف‌حساب‌ها',href:'/beneficiaries',group:'controls',icon:'◎'},
+{labelFa:'اتصال به دیتابیس',href:'/integrations',group:'controls',icon:'▦'},
 {labelFa:'گزارش‌ها',href:'/reports',group:'reports',icon:'▤'},
 {labelFa:'رویدادهای حسابرسی',href:'/audit',group:'reports',icon:'◫'}
 ] as const;
