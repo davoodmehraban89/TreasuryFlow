@@ -62,8 +62,10 @@ export function prepareReadOnlySql(input:string):string {
  for(const word of tokens)if(FORBIDDEN.has(word.toUpperCase()))
   unsafe('FORBIDDEN_OPERATION','Disallowed SQL operation: '+word.toUpperCase());
  if(/\b(?:xp_|sp_)\w*/i.test(masked))unsafe('PROCEDURE_FORBIDDEN','Stored procedure references are not supported');
- const prefix=/^SELECT\s+(?:(?:DISTINCT|ALL)\s+)?/i.exec(query)?.[0];
- if(!prefix||!/^SELECT\s+(?:(?:DISTINCT|ALL)\s+)?$/i.test(masked.slice(0,prefix.length)))
+ const prefixMatch=/^SELECT\s+(?:(?:DISTINCT|ALL)\s+)?/i.exec(query);
+ if(!prefixMatch)throw new UnsafeReadOnlySqlError('SELECT_ONLY','Unexpected SQL prefix');
+ const prefix=prefixMatch[0];
+ if(!/^SELECT\s+(?:(?:DISTINCT|ALL)\s+)?$/i.test(masked.slice(0,prefix.length)))
   unsafe('SELECT_ONLY','Unexpected SQL prefix');
  const remaining=query.slice(prefix.length);
  const top=/^TOP\s*(?:\(\s*(\d+)\s*\)|(\d+)\b)/i.exec(remaining);
