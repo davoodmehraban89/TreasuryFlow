@@ -33,6 +33,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Validate synthetic-only Iranian IBAN fixtures
+        shell: pwsh
+        run: |
+          node --test qa/windows/synthetic-iban.node.mjs
+          if($LASTEXITCODE -ne 0){throw 'SYNTHETIC_IBAN_FIXTURE_INVALID'}
       - name: Download and pin genuine installer from previous Windows VM run
         shell: pwsh
         env:
