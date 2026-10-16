@@ -44,25 +44,49 @@ try{
 
  const origin='http://127.0.0.1:3210';
  const go=async(path,heading)=>{
-   // A full Next.js navigation may replace the renderer's CDP target and
-   // invalidate pending Page.navigate replies. Reattach by URL after navigation.
    report.stage='native-route:'+path;
    const dest=origin+path;
-   const pending=conn.command('Page.navigate',{url:dest}).catch(()=>null);
-   await Promise.race([pending,sleep(850)]);
-   const socket=await wait(async()=>{
-     const response=await fetch('http://127.0.0.1:'+port+'/json/list',{signal:AbortSignal.timeout(1500)});
-     if(!response.ok)return null;
-     const pages=await response.json();
-     return pages.find(p=>p.type==='page'&&p.url?.startsWith(dest)&&p.webSocketDebuggerUrl)?.webSocketDebuggerUrl;
-   },35000);
-   try{conn.ws.close()}catch{}
-   conn=await connect(socket);
-   report.cdpReconnections++;
+   const pageInfo="({path:location.pathname,text:document.body?.innerText||'',errorToast:!!document.querySelector('.toast-error')})";
+   const isReady=x=>x?.path===path&&x.text.includes(heading)&&!x.errorToast&&!x.text.includes('خطا در بارگذاری صفحه');
+   // Electron often starts on /login already: never force a full renderer reload
+   // if the current live renderer is showing the right, hydrated page.
+   const existing=await conn.evaluate(pageInfo).catch(()=>null);
+   if(isReady(existing))return existing;
+   const navigation=conn.command('Page.navigate',{url:dest}).catch(()=>null);
+   await Promise.race([navigation,sleep(850)]);
+   let reconnects=0;
    return wait(async()=>{
-     const x=await conn.evaluate("({path:location.pathname,text:document.body?.innerText||'',errorToast:!!document.querySelector('.toast-error')})");
-     return x?.path===path&&x.text.includes(heading)&&!x.errorToast&&!x.text.includes('خطا در بارگذاری صفحه')?x:null;
-   },30000);
+     if(proc.exitCode!==null)throw Error('INSTALLED_ELECTRON_EXITED_'+proc.exitCode);
+     const current=await conn.evaluate(pageInfo).catch(()=>null);
+     if(isReady(current))return current;
+     // During a full Next page navigation Chromium can temporarily close
+     // its DevTools HTTP listener. Retry discovery; don't mark a real page
+     // as broken solely because /json/list briefly refused a connection.
+     let pages=[];
+     try{
+       const response=await fetch('http://127.0.0.1:'+port+'/json/list',{signal:AbortSignal.timeout(1800)});
+       if(response.ok)pages=await response.json();
+     }catch{
+       report.cdpTransientDiscoveryFailures=(report.cdpTransientDiscoveryFailures||0)+1;
+       return null;
+     }
+     const target=pages.find(p=>p.type==='page'&&p.url?.startsWith(dest)&&p.webSocketDebuggerUrl);
+     if(!target||reconnects>=5)return null;
+     reconnects++;
+     let candidate;
+     try{
+       candidate=await connect(target.webSocketDebuggerUrl);
+       const data=await candidate.evaluate(pageInfo);
+       if(!isReady(data)){candidate.ws.close();return null;}
+       try{conn.ws.close()}catch{}
+       conn=candidate;
+       report.cdpReconnections++;
+       return data;
+     }catch{
+       try{candidate?.ws.close()}catch{}
+       return null;
+     }
+   },60000);
  };
  const iban=createSyntheticIranianIban;
  const submit=async (page,marker,fields)=>{
