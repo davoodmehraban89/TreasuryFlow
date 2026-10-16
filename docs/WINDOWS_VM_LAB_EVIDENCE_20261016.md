@@ -48,3 +48,16 @@ Official GitHub Actions documentation requires a `workflow_dispatch` workflow fi
 Safe resolution: after user approval, introduce a tightly scoped, read-only-permission manual CI entry point on `main` with exact branch/commit selection; do not merge the application's development tree or expose the private repository. Do not change the default branch or settings without approval. A branch-specific opt-in push trigger is another option but may schedule billable runner minutes and cannot substitute for authorized provisioning.
 
 The latest feature branch changes remain UNVERIFIED on Windows until both dispatcher configuration and hosted runner availability are confirmed.
+
+
+## Desktop localhost-readiness safety fix — follow-up in this chat
+
+- Feature branch commits: `91648b640d41bbea4050b0716149e635857d3717` (readiness parser), `9364cc9ef5b41ddf7f794169b1ad2840403ca410` (5 negative/positive regression cases), `63a06ccc5038d98390201ea22d34419be33f21a3` (Electron startup guard), `8f1119e8f3622173a3c8acf3121a254bb0321114` (Windows workflow regression gate).
+- Defect: the prior Electron startup routine accepted any HTTP status below 500 on the fixed port 3210, including unrelated applications and 404 responses; it could claim startup readiness without proving TreasuryFlow was listening.
+- Fix: require HTTP 200 plus exact `status=ready` and `bankAdapter=disabled` JSON, reject oversized/malformed content, and fail when the launched server process exits before readiness.
+- Standalone local validation: `node --test qa/windows/electron-readiness.node.mjs` equivalent helper/test content on **Linux Node.js 22.16.0**: 5 PASS, 0 FAIL, 0 SKIP. Additionally JS syntax parse of updated `electron/main.cjs` and `electron/ready-check.cjs` succeeded before commit. This is **not** an Electron or Windows runtime test.
+- Windows workflow now runs these five regression cases as an explicit gate after Mayan semantics regressions; no Windows runner has executed this new commit as of this documentation update.
+- At assessment time the newest recorded GitHub Actions run was [38944906028](https://github.com/davoodmehraban89/TreasuryFlow/actions/runs/38944906028) at old SHA `514283035b66a62293309e047a84bc7a9a7d4ed4`; its job had no executed steps and no artifacts. A failed check-run annotation existed but its body could not be retrieved via the currently available connector; exact platform-side failure cause remains **UNVERIFIED**, not automatically attributed to billing.
+- `main` at SHA `5dbea663ac33f4e535ad8bca0d59b073c5aa9317` contains `README.md` only. Official `workflow_dispatch` requires the workflow to exist on default branch; both current labs are feature-only and are not manually dispatchable by the normal workflow entry point. Do not change `main` or create billable infrastructure without explicit approval.
+- Source V5/1.0.1 and original Mayan native bridge remain missing from this GitHub source snapshot; no Windows EXE, NSIS installer, live finance output or Mayan/Treasury runtime parity is newly verified.
+- Status: `LOCAL_REGRESSION_VERIFIED` for readiness parser; `WINDOWS_VM_UNVERIFIED`, `RUNNER_ROOT_CAUSE_UNVERIFIED`, `V5_NATIVE_BRIDGE_BLOCKED`, `MANUAL_DISPATCH_BLOCKED_DEFAULT_BRANCH`. No LIVE banking, production data, main merge or public release performed.
