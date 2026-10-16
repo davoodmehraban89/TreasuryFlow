@@ -17,6 +17,9 @@ $report=[ordered]@{
  stdoutBytes=0
  stderrBytes=0
  stderrMarkers=@()
+ stderrExcerpt=''
+ stdoutExcerpt=''
+ inheritedElectronRunAsNode=($env:ELECTRON_RUN_AS_NODE -eq '1')
  outcome='NOT_RUN'
 }
 $p=$null
@@ -67,5 +70,23 @@ try {
    'EACCES','EPERM','EADDRINUSE','UNHANDLED_REJECTION','Failed to launch',
    'server did not start') | Where-Object {$raw -match [regex]::Escape($_)}
  }
+ # Disposable test runner uses synthetic data. Redact probable credentials and
+ # user paths before emitting bounded diagnostics into public Actions evidence.
+ foreach($stream in @(
+   @{file=$stdout;key='stdoutExcerpt'},
+   @{file=$stderr;key='stderrExcerpt'}
+ )){
+   if(Test-Path $stream.file){
+     $raw=[string](Get-Content -LiteralPath $stream.file -Raw -ErrorAction SilentlyContinue)
+     $safe=$raw -replace '(?i)(password|token|secret|credential|authorization|api[_-]?key)(\s*[:=]\s*)[^\s,;]+','$1$2[REDACTED]'
+     $safe=$safe -replace '(?i)(https?://)[^:\s/@]+:[^\s/@]+@','$1[REDACTED]@'
+     $safe=$safe -replace '(?i)([A-Z]:\\Users\\)[^\\\r\n]+','$1[USER]'
+     $safe=$safe -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]',''
+     if($safe.Length -gt 1400){$safe=$safe.Substring(0,1400)+' [TRUNCATED]'}
+     $report[$stream.key]=$safe
+   }
+ }
+ Write-Host "Unpacked Electron diagnostics: inherited run-as-node=$($report.inheritedElectronRunAsNode); stdout bytes=$($report.stdoutBytes); stderr bytes=$($report.stderrBytes)"
+ if($report.stderrExcerpt){Write-Host "Sanitized Electron stderr: $($report.stderrExcerpt)"}
  $report | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $evidenceDir 'unpacked-runtime.json') -Encoding UTF8
 }
