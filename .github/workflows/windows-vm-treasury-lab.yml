@@ -135,14 +135,56 @@ jobs:
           $output=Join-Path $env:RUNNER_TEMP 'treasuryflow-vm-evidence'
           node "$env:GITHUB_WORKSPACE/qa/windows/electron-native-gui-smoke.mjs" $app[0].FullName $output
           if($LASTEXITCODE -ne 0){throw 'INSTALLED_ELECTRON_GUI_CDP_FAILED'}
+      - name: Record run-bound VM evidence without inferring success
+        if: always()
+        shell: pwsh
+        run: |
+          $folder=Join-Path $env:RUNNER_TEMP 'treasuryflow-vm-evidence'
+          New-Item -ItemType Directory -Path $folder -Force | Out-Null
+          $checks=@(
+            @{file='runtime.json';pass='PACKAGED_PROCESS_AND_HTTP_PASS';check='packaged_runtime'},
+            @{file='installed-runtime.json';pass='NSIS_INSTALL_AND_INSTALLED_RUNTIME_PASS';check='nsis_installed_runtime'},
+            @{file='treasuryflow-native-gui.json';pass='REAL_INSTALLED_ELECTRON_GUI_PASS';check='installed_gui'}
+          )
+          $results=@()
+          foreach($item in $checks){
+            $file=Join-Path $folder $item.file
+            $state='MISSING'
+            if(Test-Path $file){
+              try {
+                $record=Get-Content $file -Raw | ConvertFrom-Json
+                $state=if($record.outcome -eq $item.pass){'PASS'}else{'FAILED_OR_INCOMPLETE'}
+              }catch{$state='UNREADABLE'}
+            }
+            $results+=@{name=$item.check;file=$item.file;result=$state}
+          }
+          $verified=(@($results | Where-Object {$_.result -ne 'PASS'}).Count -eq 0)
+          $proof=[ordered]@{
+            schema='treasuryflow-windows-vm-evidence-v1'
+            repository=$env:GITHUB_REPOSITORY
+            run_id=$env:GITHUB_RUN_ID
+            run_attempt=$env:GITHUB_RUN_ATTEMPT
+            head_sha=$env:GITHUB_SHA
+            ref=$env:GITHUB_REF
+            runner_os=$env:RUNNER_OS
+            runner_name=$env:RUNNER_NAME
+            run_url="$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            source_kind=$env:LAB_VERSION
+            windows_acceptance=if($verified){'PASS'}else{'NOT_VERIFIED'}
+            checks=$results
+          }
+          $proof | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $folder 'verification.json') -Encoding UTF8
+          "Evidence run: $($proof.run_url)" >> $env:GITHUB_STEP_SUMMARY
+          "Head SHA: $env:GITHUB_SHA; runner OS: $env:RUNNER_OS; acceptance: $($proof.windows_acceptance)" >> $env:GITHUB_STEP_SUMMARY
       - name: Upload private Windows artifacts and non-sensitive evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: treasuryflow-windows-build-and-evidence
           path: |
-            ${{ env.LAB_SOURCE }}}/release/TreasuryFlow-*-Windows-x64.exe
-            ${{ runner.temp }}}/treasuryflow-vm-evidence/*.json
+            ${{ env.LAB_SOURCE }}/release/TreasuryFlow-*-Windows-x64.exe
+            ${{ runner.temp }}/treasuryflow-vm-evidence/*.json
+            ${{ runner.temp }}/treasuryflow-vm-evidence/*.png
           retention-days: 7
           if-no-files-found: warn
       - name: State safety boundary
