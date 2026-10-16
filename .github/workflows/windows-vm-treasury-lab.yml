@@ -125,6 +125,16 @@ jobs:
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE/scripts/windows-vm-treasury-install-smoke.ps1" -SourceRoot "$env:LAB_SOURCE"
+      - name: Inspect real installed Electron browser window and query-copy UI through CDP
+        if: steps.native.outputs.buildable == 'true'
+        shell: pwsh
+        run: |
+          $folder=Join-Path $env:RUNNER_TEMP 'TreasuryFlow-VM-Installed'
+          $app=@(Get-ChildItem $folder -File -Recurse -Filter 'TreasuryFlow.exe' -ErrorAction SilentlyContinue)
+          if($app.Count -ne 1){throw 'REAL_INSTALLED_ELECTRON_EXE_MISSING'}
+          $output=Join-Path $env:RUNNER_TEMP 'treasuryflow-vm-evidence'
+          node "$env:GITHUB_WORKSPACE/qa/windows/electron-native-gui-smoke.mjs" $app[0].FullName $output
+          if($LASTEXITCODE -ne 0){throw 'INSTALLED_ELECTRON_GUI_CDP_FAILED'}
       - name: Upload private Windows artifacts and non-sensitive evidence
         if: always()
         uses: actions/upload-artifact@v4
