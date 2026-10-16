@@ -65,10 +65,12 @@ function serverPath() {
 
 async function startServer() {
   const script = serverPath();
+  // Expose bounded diagnostic stderr only in a synthetic-data Windows VM.
+  const vmDiagnostics = process.env.TREASURYFLOW_VM_DIAGNOSTICS === '1';
   serverProcess = spawn(process.execPath, [script], {
     cwd: path.dirname(script),
     windowsHide: true,
-    stdio: 'ignore',
+    stdio: vmDiagnostics ? ['ignore', 'ignore', 'pipe'] : 'ignore',
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
@@ -79,8 +81,20 @@ async function startServer() {
       BANK_ADAPTER_MODE: 'disabled'
     }
   });
+  let childStderr = '';
+  if (vmDiagnostics && serverProcess.stderr) {
+    serverProcess.stderr.on('data', chunk => {
+      childStderr = (childStderr + chunk.toString('utf8')).slice(-2400);
+    });
+  }
   serverProcess.on('error', err => { serverStartError = err; });
   serverProcess.on('exit', code => {
+    if (vmDiagnostics && childStderr) {
+      const scrubbed = childStderr
+        .replace(/\b(password|token|secret|credential|authorization|api[_-]?key)\s*[:=]\s*\S+/gi, '$1=[REDACTED]')
+        .replace(/https?:\/\/[^@\s]+@/gi, 'https://[REDACTED]@');
+      console.error('TreasuryFlow child stderr (sanitized):', scrubbed);
+    }
     if (!app.isQuitting && code !== 0) console.error('TreasuryFlow server exited', code);
   });
   await waitForServer(`http://127.0.0.1:${PORT}/api/ready`);
