@@ -62,5 +62,19 @@ try {
  throw
 }finally {
  if($p -and !$p.HasExited){try{& taskkill.exe /T /F /PID $p.Id | Out-Null}catch{}}
+ # NSIS and Electron can spawn an additional real app or NODE child process.
+ # The next CDP test must start from a clean disposable VM and free local port.
+ $orphans=@(Get-Process -Name 'TreasuryFlow' -ErrorAction SilentlyContinue)
+ $report.cleanupProcessCount=$orphans.Count
+ foreach($orphan in $orphans){try{Stop-Process -Id $orphan.Id -Force -ErrorAction Stop}catch{}}
+ $clear=$false
+ for($attempt=0;$attempt -lt 30;$attempt++){
+   $listeners=@(Get-NetTCPConnection -LocalPort 3210 -State Listen -ErrorAction SilentlyContinue)
+   if($listeners.Count -eq 0){$clear=$true;break}
+   Start-Sleep -Milliseconds 500
+ }
+ $report.localPort3210Freed=$clear
+ if(!$clear){$report.outcome='FAIL_CLEANUP_PORT_OCCUPIED'}
  $report|ConvertTo-Json -Depth 4|Set-Content (Join-Path $evidenceDir 'installed-runtime.json') -Encoding UTF8
+ if(!$clear){throw 'INSTALLED_SMOKE_LEFT_PORT_3210_OCCUPIED'}
 }
