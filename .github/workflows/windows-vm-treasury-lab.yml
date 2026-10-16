@@ -54,6 +54,11 @@ jobs:
           if(!(Test-Path (Join-Path $folder 'package-lock.json'))){throw 'PACKAGE_LOCK_MISSING'}
           $bad=@(Get-ChildItem $folder -Recurse -File -Force | Where-Object {$_.Name -match '^\.env($|\.)|^license\.key$|^connectionString\.txt$|\.pfx$|\.p12$|\.pem$|\.sqlite$|\.db$'})
           if($bad.Count){throw 'SENSITIVE_OR_RUNTIME_FILES_PRESENT'}
+      - name: Run independently testable Mayan/Treasury semantic comparison regressions
+        shell: pwsh
+        run: |
+          node --test qa/mayan/compare-runtime.node.mjs
+          if($LASTEXITCODE -ne 0){throw 'PARITY_CONTRACT_TESTS_FAILED'}
       - name: Run real code quality and unit/integration tests
         shell: pwsh
         run: |
