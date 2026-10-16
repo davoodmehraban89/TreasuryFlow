@@ -168,6 +168,11 @@ jobs:
           $output=Join-Path $env:RUNNER_TEMP 'treasuryflow-vm-evidence'
           node "$env:GITHUB_WORKSPACE/qa/windows/electron-native-gui-smoke.mjs" $app[0].FullName $output
           if($LASTEXITCODE -ne 0){throw 'INSTALLED_ELECTRON_GUI_CDP_FAILED'}
+      - name: Uninstall real NSIS installation after native tests
+        if: steps.native.outputs.buildable == 'true'
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/windows-vm-treasury-uninstall-smoke.ps1" -InstalledFolder (Join-Path $env:RUNNER_TEMP 'TreasuryFlow-VM-Installed')
       - name: Record run-bound VM evidence without inferring success
         if: always()
         shell: pwsh
@@ -178,7 +183,8 @@ jobs:
             @{file='unpacked-runtime.json';pass='UNPACKED_ELECTRON_HTTP_AND_PROCESS_PASS';check='unpacked_process'},
             @{file='runtime.json';pass='PACKAGED_PROCESS_AND_HTTP_PASS';check='packaged_runtime'},
             @{file='installed-runtime.json';pass='NSIS_INSTALL_AND_INSTALLED_RUNTIME_PASS';check='nsis_installed_runtime'},
-            @{file='treasuryflow-native-gui.json';pass='REAL_INSTALLED_ELECTRON_GUI_PASS';check='installed_gui'}
+            @{file='treasuryflow-native-gui.json';pass='REAL_INSTALLED_ELECTRON_GUI_PASS';check='installed_gui'},
+            @{file='uninstall-runtime.json';pass='NSIS_REAL_UNINSTALL_PASS';check='real_uninstall'}
           )
           $results=@()
           foreach($item in $checks){
@@ -188,6 +194,13 @@ jobs:
               try {
                 $record=Get-Content $file -Raw | ConvertFrom-Json
                 $state=if($record.outcome -eq $item.pass){'PASS'}else{'FAILED_OR_INCOMPLETE'}
+                if($state -eq 'PASS' -and $item.check -eq 'installed_gui'){
+                  $required=@('localEntry','realCDP','localOrigin','integrations','queryEditor','copyQuery','copyExactlyEditedSql','syntheticAccount','syntheticBeneficiary','syntheticDraft','appReopened','durableData','auditPersisted')
+                  foreach($field in $required){
+                    if(-not $record.$field){$state='FINANCIAL_UI_MATRIX_INCOMPLETE';break}
+                  }
+                  if(@($record.visitedRoutes).Count -ne 10){$state='ROUTE_MATRIX_INCOMPLETE'}
+                }
               }catch{$state='UNREADABLE'}
             }
             $results+=@{name=$item.check;file=$item.file;result=$state}
@@ -227,3 +240,4 @@ jobs:
         run: |
           'Bank LIVE disabled. No production SQL connection, live payment, public release or actual customer data.' >> $env:GITHUB_STEP_SUMMARY
           'Repository branch is NOT the user V5 unless a SHA-256-pinned private source archive was staged.' >> $env:GITHUB_STEP_SUMMARY
+          'Local entry link is NOT a credential-authenticated login; cross-version upgrade is NOT VERIFIED without a vetted baseline installer.' >> $env:GITHUB_STEP_SUMMARY
