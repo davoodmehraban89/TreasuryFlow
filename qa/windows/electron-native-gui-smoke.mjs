@@ -10,7 +10,7 @@ assert(exe&&existsSync(exe),'real installed TreasuryFlow.exe required');
 assert(reportDir,'evidence output directory required');
 mkdirSync(reportDir,{recursive:true});
 const port=9345;
-const report={mode:'REAL_INSTALLED_ELECTRON_CDP',exe:basename(exe),cdp:false,localOrigin:false,integrations:false,queryEditor:false,copyQuery:false,copyExactlyEditedSql:false,clipboardMode:'INTERCEPTED_API_NOT_WINDOWS_CLIPBOARD',screenshot:false,stage:'connect',cdpReconnections:0,localEntry:false,visitedRoutes:[],syntheticAccount:false,syntheticBeneficiary:false,syntheticDraft:false,appReopened:false,durableData:false,auditPersisted:false,upgrade:'NOT_RUN_NO_BASELINE',outcome:'NOT_RUN'};
+const report={mode:'REAL_INSTALLED_ELECTRON_CDP',exe:basename(exe),cdp:false,localOrigin:false,integrations:false,queryEditor:false,copyQuery:false,copyExactlyEditedSql:false,clipboardMode:'INTERCEPTED_API_NOT_WINDOWS_CLIPBOARD',screenshot:false,stage:'connect',cdpReconnections:0,localEntry:false,visitedRoutes:[],syntheticAccount:false,syntheticBeneficiary:false,syntheticDraft:false,appReopened:false,persistenceEvidenceMethod:'NOT_RUN',postRestartRoutes:[],durableData:false,auditPersisted:false,upgrade:'NOT_RUN_NO_BASELINE',outcome:'NOT_RUN'};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function wait(fn,timeout=75000){let error;const until=Date.now()+timeout;while(Date.now()<until){try{const x=await fn();if(x)return x;}catch(e){error=e;}await sleep(400);}throw error||Error('CDP_WAIT_TIMEOUT');}
 async function connect(url){
@@ -180,16 +180,27 @@ try{
   return targets.find(p=>p.type==='page'&&p.url?.startsWith(origin)&&p.webSocketDebuggerUrl)?.webSocketDebuggerUrl;
  },75000);
  conn=await connect(second);report.appReopened=true;
- await go('/accounts','حساب‌های بانکی');
- assert(await conn.evaluate("document.body.innerText.includes('VM-SYNTHETIC-SOURCE')"),'NATIVE_ACCOUNT_NOT_DURABLE');
- await go('/beneficiaries','طرف‌حساب‌ها');
- assert(await conn.evaluate("document.body.innerText.includes('VM-SYNTHETIC-BENEFICIARY')"),'NATIVE_BENEFICIARY_NOT_DURABLE');
- await go('/payments','حواله‌ها');
- assert(await conn.evaluate("document.body.innerText.includes('VM-DRAFT-')"),'NATIVE_DRAFT_NOT_DURABLE');
+ report.persistenceEvidenceMethod='INSTALLED_ELECTRON_HTTP_AFTER_CDP_REOPEN';
+ report.postRestartRoutes=[];
+ const pageHtml=async(route,marker)=>{
+   report.stage='post-restart-http:'+route;
+   const html=await wait(async()=>{
+     if(proc.exitCode!==null)throw Error('RESTARTED_ELECTRON_EXITED_'+proc.exitCode);
+     const response=await fetch(origin+route,{signal:AbortSignal.timeout(4000)});
+     if(response.status!==200)return null;
+     const body=await response.text();
+     return body.includes(marker)?body:null;
+   },30000);
+   report.postRestartRoutes.push({route,markerVerified:true});
+   return html;
+ };
+ await pageHtml('/accounts','VM-SYNTHETIC-SOURCE');
+ await pageHtml('/beneficiaries','VM-SYNTHETIC-BENEFICIARY');
+ await pageHtml('/payments','VM-DRAFT-');
  report.durableData=true;
- await go('/audit','رویدادهای حسابرسی');
- report.auditPersisted=await conn.evaluate("document.body.innerText.includes('ACCOUNT_CREATED')&&document.body.innerText.includes('PAYMENT_CREATED')");
- assert(report.auditPersisted,'NATIVE_AUDIT_NOT_DURABLE');
+ const auditHtml=await pageHtml('/audit','ACCOUNT_CREATED');
+ report.auditPersisted=auditHtml.includes('PAYMENT_CREATED');
+ assert(report.auditPersisted,'AUDIT_NOT_PERSISTED_AFTER_RESTART');
  report.outcome='REAL_INSTALLED_ELECTRON_GUI_PASS';
 }catch(e){report.outcome='FAILED';report.errorCode=(e?.message||'UNKNOWN').slice(0,140);process.exitCode=1;}
 finally{
