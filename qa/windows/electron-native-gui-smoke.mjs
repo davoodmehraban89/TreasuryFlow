@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {isIntegrationsEditorReady} from './gui-readiness.mjs';
 import {spawn,execFileSync} from 'node:child_process';
 import {writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {join,basename} from 'node:path';
@@ -43,7 +44,7 @@ try{
  await conn.command('Page.navigate',{url:'http://127.0.0.1:3210/integrations'});
  const page=await wait(async()=>{const x=await conn.evaluate(
  "({href:location.href,title:document.title,editor:!!document.querySelector('textarea'),copy:[...document.querySelectorAll('button')].some(b=>b.textContent.includes('کپی کوئری'))})");
- return x?.href?.endsWith('/integrations')?x:null;});
+ return isIntegrationsEditorReady(x)?x:null;});
  report.integrations=true;report.queryEditor=page.editor;report.copyQuery=page.copy;
  assert(report.queryEditor,'QUERY_EDITOR_MISSING_IN_NATIVE_APP');
  assert(report.copyQuery,'COPY_BUTTON_MISSING_IN_NATIVE_APP');
