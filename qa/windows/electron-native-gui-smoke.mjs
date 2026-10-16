@@ -9,7 +9,7 @@ assert(exe&&existsSync(exe),'real installed TreasuryFlow.exe required');
 assert(reportDir,'evidence output directory required');
 mkdirSync(reportDir,{recursive:true});
 const port=9345;
-const report={mode:'REAL_INSTALLED_ELECTRON_CDP',exe:basename(exe),cdp:false,localOrigin:false,integrations:false,queryEditor:false,copyQuery:false,copyExactlyEditedSql:false,clipboardMode:'INTERCEPTED_API_NOT_WINDOWS_CLIPBOARD',screenshot:false,outcome:'NOT_RUN'};
+const report={mode:'REAL_INSTALLED_ELECTRON_CDP',exe:basename(exe),cdp:false,localOrigin:false,integrations:false,queryEditor:false,copyQuery:false,copyExactlyEditedSql:false,clipboardMode:'INTERCEPTED_API_NOT_WINDOWS_CLIPBOARD',screenshot:false,localEntry:false,visitedRoutes:[],syntheticAccount:false,syntheticBeneficiary:false,syntheticDraft:false,appReopened:false,durableData:false,auditPersisted:false,upgrade:'NOT_RUN_NO_BASELINE',outcome:'NOT_RUN'};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function wait(fn,timeout=75000){let error;const until=Date.now()+timeout;while(Date.now()<until){try{const x=await fn();if(x)return x;}catch(e){error=e;}await sleep(400);}throw error||Error('CDP_WAIT_TIMEOUT');}
 async function connect(url){
@@ -31,12 +31,42 @@ async function connect(url){
 }
 let proc,conn;
 try{
- const env={...process.env,BANK_ADAPTER_MODE:'disabled',TREASURYFLOW_DESKTOP_LOCAL:'1'};
+ const env={...process.env,BANK_ADAPTER_MODE:'disabled',TREASURYFLOW_DESKTOP_LOCAL:'1',TREASURYFLOW_DATA_FILE:join(reportDir,'vm-only-treasuryflow.sqlite')};
  proc=spawn(exe,['--remote-debugging-port='+port,'--remote-allow-origins=*'],{env,stdio:'ignore',windowsHide:false});
  const target=await wait(async()=>{const r=await fetch('http://127.0.0.1:'+port+'/json/list',{signal:AbortSignal.timeout(1500)});
  if(!r.ok)return null;const pages=await r.json();
  return pages.find(p=>p.type==='page'&&p.url?.startsWith('http://127.0.0.1:3210')&&p.webSocketDebuggerUrl)?.webSocketDebuggerUrl;});
  conn=await connect(target);report.cdp=true;
+
+ const origin='http://127.0.0.1:3210';
+ const go=async(path,heading)=>{
+   await conn.command('Page.navigate',{url:origin+path});
+   return wait(async()=>{
+     const x=await conn.evaluate("({path:location.pathname,text:document.body?.innerText||''})");
+     return x?.path===path&&x.text.includes(heading)&&!x.text.includes('خطا در بارگذاری صفحه')?x:null;
+   },30000);
+ };
+ const iban=(digit)=>{
+   const number='0'.repeat(23)+String(digit);
+   let mod=0;for(const d of number+'182700')mod=(mod*10+Number(d))%97;
+   return 'IR'+String(98-mod).padStart(2,'0')+number;
+ };
+ const submit=async (page,marker,fields)=>{
+   await go(page,marker);
+   await conn.evaluate('window.__vmSynthetic='+JSON.stringify(fields));
+   return conn.evaluate("(()=>{const form=document.querySelector('main form');if(!form)return 'NO_FORM';for(const [k,v] of Object.entries(window.__vmSynthetic)){const el=form.elements.namedItem(k);if(!el)return 'MISSING_'+k;if(el.type==='checkbox'){el.checked=Boolean(v);}else if(el.tagName==='SELECT'){el.value=v==='@FIRST'?[...el.options].find(o=>o.value)?.value||'':String(v);}else{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,String(v));}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}if(!form.reportValidity())return 'INVALID_FORM';form.requestSubmit();return 'SUBMITTED';})()");
+ };
+ await go('/login','ورود به محیط محلی امن');
+ assert(await conn.evaluate("(()=>{const a=document.querySelector('a[href=\"/dashboard\"]');if(!a)return false;a.click();return true;})()"),'NATIVE_LOCAL_ENTRY_MISSING');
+ await wait(()=>conn.evaluate("location.pathname==='/dashboard'&&document.body?.innerText.includes('داشبورد خزانه‌داری')"));
+ report.localEntry=true; // local entry link, NOT credential authentication
+ for(const [route,heading] of [
+  ['/dashboard','داشبورد خزانه‌داری'],['/payments','حواله‌ها'],
+  ['/payments/new','ثبت حواله جدید'],['/accounts','حساب‌های بانکی'],
+  ['/beneficiaries','طرف‌حساب‌ها'],['/queue','صف ارسال'],
+  ['/reconciliation','مغایرت‌گیری'],['/integrations','اتصال به دیتابیس'],
+  ['/reports','گزارش‌های خزانه‌داری'],['/audit','رویدادهای حسابرسی']
+ ]){await go(route,heading);report.visitedRoutes.push({route,status:'PASS'});}
  const home=await wait(()=>conn.evaluate('({href:location.href,title:document.title})'));
  report.localOrigin=new URL(home.href).origin==='http://127.0.0.1:3210';
  assert(report.localOrigin,'NATIVE_APP_ORIGIN_NOT_LOCAL');
@@ -74,6 +104,44 @@ try{
  const png=await conn.command('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});
  assert(png.data,'NATIVE_SCREENSHOT_MISSING');
  writeFileSync(join(reportDir,'treasuryflow-installed-ui.png'),Buffer.from(png.data,'base64'));report.screenshot=true;
+
+ // Synthetic local actions through the actual installed Electron UI.
+ assert.equal(await submit('/accounts','افزودن حساب بانکی',{
+  name:'VM-SYNTHETIC-SOURCE',bankName:'VM-ONLY-BANK',iban:iban(1)}),'SUBMITTED');
+ await wait(()=>conn.evaluate("location.pathname==='/accounts'&&document.body?.innerText.includes('حساب ثبت شد')&&document.body.innerText.includes('VM-SYNTHETIC-SOURCE')"));
+ report.syntheticAccount=true;
+ assert.equal(await submit('/beneficiaries','افزودن طرف‌حساب',{
+  name:'VM-SYNTHETIC-BENEFICIARY',iban:iban(2),whitelisted:true}),'SUBMITTED');
+ await wait(()=>conn.evaluate("location.pathname==='/beneficiaries'&&document.body?.innerText.includes('طرف‌حساب ثبت شد')&&document.body.innerText.includes('VM-SYNTHETIC-BENEFICIARY')"));
+ report.syntheticBeneficiary=true;
+ assert.equal(await submit('/payments/new','ثبت پیش‌نویس حواله',{
+  sourceAccountId:'@FIRST',beneficiaryId:'@FIRST',amountIrr:'1234567',
+  paymentDate:'2026-10-16',clientReference:'VM-DRAFT-'+(process.env.GITHUB_RUN_ID||'LOCAL'),
+  description:'VM synthetic draft only'}),'SUBMITTED');
+ await wait(()=>conn.evaluate("/^\\/payments\\/[^/]+$/.test(location.pathname)&&document.body?.innerText.includes('VM-DRAFT-')"));
+ report.syntheticDraft=true;
+ conn.ws.close();
+ execFileSync('taskkill.exe',['/T','/F','/PID',String(proc.pid)],{stdio:'ignore',timeout:10000});
+ await wait(async()=>{try{await fetch(origin+'/api/ready',{signal:AbortSignal.timeout(1000)});return false;}catch{return true;}},15000);
+ proc=spawn(exe,['--remote-debugging-port='+port,'--remote-allow-origins=*'],{env,stdio:'ignore',windowsHide:false});
+ const second=await wait(async()=>{
+  const r=await fetch(origin+'/api/ready',{signal:AbortSignal.timeout(1500)});
+  if(!r.ok)return null;const ready=await r.json();
+  if(ready.status!=='ready'||ready.bankAdapter!=='disabled')return null;
+  const targets=await (await fetch('http://127.0.0.1:'+port+'/json/list',{signal:AbortSignal.timeout(1500)})).json();
+  return targets.find(p=>p.type==='page'&&p.url?.startsWith(origin)&&p.webSocketDebuggerUrl)?.webSocketDebuggerUrl;
+ },75000);
+ conn=await connect(second);report.appReopened=true;
+ await go('/accounts','حساب‌های بانکی');
+ assert(await conn.evaluate("document.body.innerText.includes('VM-SYNTHETIC-SOURCE')"),'NATIVE_ACCOUNT_NOT_DURABLE');
+ await go('/beneficiaries','طرف‌حساب‌ها');
+ assert(await conn.evaluate("document.body.innerText.includes('VM-SYNTHETIC-BENEFICIARY')"),'NATIVE_BENEFICIARY_NOT_DURABLE');
+ await go('/payments','حواله‌ها');
+ assert(await conn.evaluate("document.body.innerText.includes('VM-DRAFT-')"),'NATIVE_DRAFT_NOT_DURABLE');
+ report.durableData=true;
+ await go('/audit','رویدادهای حسابرسی');
+ report.auditPersisted=await conn.evaluate("document.body.innerText.includes('ACCOUNT_CREATED')&&document.body.innerText.includes('PAYMENT_CREATED')");
+ assert(report.auditPersisted,'NATIVE_AUDIT_NOT_DURABLE');
  report.outcome='REAL_INSTALLED_ELECTRON_GUI_PASS';
 }catch(e){report.outcome='FAILED';report.errorCode=(e?.message||'UNKNOWN').slice(0,140);process.exitCode=1;}
 finally{
