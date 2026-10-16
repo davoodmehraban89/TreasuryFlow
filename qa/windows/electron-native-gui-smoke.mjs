@@ -69,6 +69,12 @@ try{
    await go(page,marker);
    report.stage='native-field-injection:'+page;
    await conn.evaluate('window.__vmSynthetic='+JSON.stringify(fields));
+   const formSnapshot=await conn.evaluate("(()=>{const form=document.querySelector('main form');return form?Object.fromEntries(new FormData(form)):null})()");
+   assert(formSnapshot,'NATIVE_FORM_NOT_FOUND_'+page);
+   for(const [name,value] of Object.entries(fields)){
+     if(value==='@FIRST'){assert(formSnapshot[name],'NATIVE_SELECT_NOT_SET_'+name);}
+     else if(typeof value!=='boolean')assert.equal(String(formSnapshot[name]),String(value),'NATIVE_FORMDATA_MISMATCH_'+name);
+   }
    report.stage='native-submit:'+page;
    const submitted=await conn.evaluate("(()=>{const form=document.querySelector('main form');if(!form)return 'NO_FORM';for(const [k,v] of Object.entries(window.__vmSynthetic)){const el=form.elements.namedItem(k);if(!el)return 'MISSING_'+k;if(el.type==='checkbox'){el.checked=Boolean(v);}else if(el.tagName==='SELECT'){el.value=v==='@FIRST'?[...el.options].find(o=>o.value)?.value||'':String(v);}else{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,String(v));}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}if(!form.reportValidity())return 'INVALID_FORM';setTimeout(()=>form.requestSubmit(),50);return 'SUBMITTED';})()");
    if(submitted!=='SUBMITTED')return submitted;
