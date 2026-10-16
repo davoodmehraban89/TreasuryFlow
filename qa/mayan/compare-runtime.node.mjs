@@ -1,0 +1,21 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {meaningOfMayan,compareMayanTreasuryRuntime as compare} from './compare-runtime.mjs';
+const m=(rest={})=>({caseId:'CASE_1',amountIrr:'125000',paymentIdentifier:'PAY1',depositIdentifier:'DEP1',
+  status:4,isError:false,insertResult:{error:false,errorCode:200,issueId:'SYNTHETIC'},...rest});
+const t=(rest={})=>({caseId:'CASE_1',amountIrr:'125000',paymentIdentifier:'PAY1',depositIdentifier:'DEP1',state:'SUBMITTED',...rest});
+const pair=(a=m(),b=t())=>[{source:'MAYAN_RUNTIME_CAPTURE',currency:'IRR',rows:[a]},{source:'TREASURY_RUNTIME_CAPTURE',currency:'IRR',rows:[b]}];
+test('Mayan successful API insert is only a bank acceptance',()=>assert.equal(meaningOfMayan(m()),'API_ACCEPTED_NOT_SETTLED'));
+test('Mayan status 1 is not a bank acceptance',()=>assert.equal(meaningOfMayan(m({status:1})),'NO_BANK_ACCEPTANCE_PROOF'));
+test('Mayan status 3 error requires review',()=>assert.equal(meaningOfMayan(m({status:3,isError:true})),'ERROR_REQUIRES_REVIEW'));
+test('Mayan contradictory status/flag requires review',()=>assert.equal(meaningOfMayan(m({isError:true})),'CONFLICT_REQUIRES_REVIEW'));
+test('same normalized synthetic outcome is semantically compatible',()=>assert.equal(compare(...pair()).passed,true));
+test('premature settlement is rejected',()=>assert.equal(compare(...pair(m(),t({state:'SETTLED'}))).passed,false));
+test('payment identifier mismatch is reported',()=>assert.equal(compare(...pair(m(),t({paymentIdentifier:'BAD'}))).differences[0].field,'paymentIdentifier'));
+test('deposit identifier mismatch is independent',()=>assert.equal(compare(...pair(m(),t({depositIdentifier:'BAD'}))).differences[0].field,'depositIdentifier'));
+test('IRR amount mismatch is reported',()=>assert.equal(compare(...pair(m(),t({amountIrr:'125001'}))).differences[0].code,'AMOUNT_IRR_MISMATCH'));
+test('cannot mark an unconfirmed payment as submitted',()=>assert.equal(compare(...pair(m({status:1}),t())).passed,false));
+test('duplicate Mayan IDs are rejected',()=>assert.throws(()=>compare({source:'MAYAN_RUNTIME_CAPTURE',currency:'IRR',rows:[m(),m()]},pair()[1]),/NOT_UNIQUE/));
+test('missing treasury output row is reported',()=>assert.equal(compare(pair()[0],{source:'TREASURY_RUNTIME_CAPTURE',currency:'IRR',rows:[]}).passed,false));
+test('noninteger financial unit is forbidden',()=>assert.throws(()=>compare(...pair(m({amountIrr:'125000.0'}),t())),/IRR_UNIT/));
+test('plain synthetic datasets cannot masquerade as real runtime captures',()=>assert.throws(()=>compare({source:'SYNTHETIC',currency:'IRR',rows:[m()]},pair()[1]),/VERIFIED/));
