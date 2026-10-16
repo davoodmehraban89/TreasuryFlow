@@ -45,8 +45,8 @@ try {
  }
  if(!$report.httpReady){throw 'INSTALLED_APP_READINESS_TIMEOUT'}
  if(!$report.bankAdapterDisabled){throw 'INSTALLED_APP_BANK_NOT_DISABLED'}
- $home=Invoke-WebRequest 'http://127.0.0.1:3210' -TimeoutSec 12
- $report.homeHtmlLoaded=($home.StatusCode -eq 200 -and $home.Content -match 'TreasuryFlow')
+ $homePage=Invoke-WebRequest 'http://127.0.0.1:3210' -TimeoutSec 12
+ $report.homeHtmlLoaded=($homePage.StatusCode -eq 200 -and $homePage.Content -match 'TreasuryFlow')
  if(!$report.homeHtmlLoaded){throw 'INSTALLED_APP_HTML_FAILED'}
  $report.outcome='NSIS_INSTALL_AND_INSTALLED_RUNTIME_PASS'
  'A REAL NSIS Setup was silently installed under runner.temp, and the installed TreasuryFlow executable passed local readiness and HTML checks.' >> $env:GITHUB_STEP_SUMMARY
