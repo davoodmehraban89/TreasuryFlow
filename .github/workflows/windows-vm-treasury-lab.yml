@@ -120,6 +120,11 @@ jobs:
           $setups=@(Get-ChildItem "$env:LAB_SOURCE/release/TreasuryFlow-Setup-*-Windows-x64.exe" -ErrorAction SilentlyContinue)
           if($setups.Count -ne 1 -or $setups[0].Length -lt 1000000){throw 'NSIS_SETUP_EXE_MISSING'}
           'Setup EXE built; full unattended install acceptance remains a separate test.' >> $env:GITHUB_STEP_SUMMARY
+      - name: Silent-install genuine NSIS Setup and run its installed EXE
+        if: steps.native.outputs.buildable == 'true'
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/windows-vm-treasury-install-smoke.ps1" -SourceRoot "$env:LAB_SOURCE"
       - name: Upload private Windows artifacts and non-sensitive evidence
         if: always()
         uses: actions/upload-artifact@v4
