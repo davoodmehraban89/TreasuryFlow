@@ -4,7 +4,7 @@ $evidenceDir=Join-Path $env:RUNNER_TEMP 'treasuryflow-vm-evidence'
 New-Item -ItemType Directory $evidenceDir -Force | Out-Null
 $report=[ordered]@{installerPresent=$false;installerSha256=$null;silentInstall='NOT_RUN';
  installedExecutableFound=$false;installedProcessLaunched=$false;httpReady=$false;
- bankAdapterDisabled=$false;homeHtmlLoaded=$false;outcome='NOT_RUN'}
+ bankAdapterDisabled=$false;homeHtmlLoaded=$false;installSeconds=0;installTimeoutSeconds=240;installerProcessExited=$false;outcome='NOT_RUN'}
 $target=Join-Path $env:RUNNER_TEMP 'TreasuryFlow-VM-Installed'
 $p=$null
 try {
@@ -15,13 +15,19 @@ try {
  $report.installerSha256=(Get-FileHash $setup -Algorithm SHA256).Hash
  if(Test-Path $target){throw 'INSTALL_TEST_DIRECTORY_ALREADY_EXISTS'}
  # NSIS silent switch; /D=<path> must be the last argument.
+ $stopwatch=[System.Diagnostics.Stopwatch]::StartNew()
  $setupProcess=Start-Process -FilePath $setup -ArgumentList @('/S',('/D='+$target)) -PassThru
  # Wait only for the NSIS installer PID, not the entire inherited process tree.
  # This follows Factor-easyPro's native Windows VM lab and has a hard timeout.
- if(!$setupProcess.WaitForExit(90000)){
+ if(!$setupProcess.WaitForExit(240000)){
+   $report.installSeconds=[math]::Round($stopwatch.Elapsed.TotalSeconds,1)
+   $report.installedExeSeenAtTimeout=@(Get-ChildItem -LiteralPath $target -Recurse -File -Filter 'TreasuryFlow.exe' -ErrorAction SilentlyContinue).Count -gt 0
    try{$setupProcess.Kill()}catch{}
-   throw 'NSIS_INSTALL_TIMEOUT'
+   throw 'NSIS_INSTALL_TIMEOUT_AFTER_240_SECONDS'
  }
+ $stopwatch.Stop()
+ $report.installSeconds=[math]::Round($stopwatch.Elapsed.TotalSeconds,1)
+ $report.installerProcessExited=$true
  if($setupProcess.ExitCode -ne 0){throw ('NSIS_INSTALLER_NONZERO_EXIT_'+$setupProcess.ExitCode)}
  if(!(Test-Path $target)){throw 'NSIS_INSTALL_LOCATION_NOT_CREATED'}
  $report.silentInstall='PASS'
