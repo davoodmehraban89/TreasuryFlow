@@ -1,0 +1,135 @@
+name: TreasuryFlow Windows VM Build & Real Runtime Lab
+
+on:
+  push:
+    branches: [ci/windows-dual-app-lab-20261016]
+  workflow_dispatch:
+    inputs:
+      v5_source_tag:
+        description: "Private GitHub release tag with TreasuryFlow-V5-CI-Source.zip"
+        type: string
+        required: false
+      v5_sha256:
+        description: "SHA-256 of TreasuryFlow-V5-CI-Source.zip"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  treasury-windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Stage optional reviewed V5 sources with SHA-256 verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${ secrets.GITHUB_TOKEN }
+          SOURCE_TAG: ${ inputs.v5_source_tag }
+          SOURCE_SHA: ${ inputs.v5_sha256 }
+          REPO_NAME: ${ github.repository }
+        run: |
+          $ErrorActionPreference='Stop'
+          $folder=$env:GITHUB_WORKSPACE
+          if ($env:SOURCE_TAG) {
+            if($env:SOURCE_SHA -notmatch '^[a-fA-F0-9]{64}$'){throw 'REQUIRED_V5_SHA256_MISSING'}
+            gh release download $env:SOURCE_TAG --repo $env:REPO_NAME --pattern TreasuryFlow-V5-CI-Source.zip --dir $env:RUNNER_TEMP --clobber
+            $zip=Join-Path $env:RUNNER_TEMP 'TreasuryFlow-V5-CI-Source.zip'
+            if((Get-FileHash $zip -Algorithm SHA256).Hash -ne $env:SOURCE_SHA.ToUpperInvariant()){throw 'V5_SHA256_MISMATCH'}
+            $folder=Join-Path $env:RUNNER_TEMP 'TreasuryFlow-V5'
+            Expand-Archive -LiteralPath $zip -DestinationPath $folder -Force
+            'LAB_VERSION=V5_FROM_PRIVATE_RELEASE' >> $env:GITHUB_ENV
+          } else {
+            'LAB_VERSION=REPO_BRANCH_NOT_V5' >> $env:GITHUB_ENV
+          }
+          "LAB_SOURCE=$folder" >> $env:GITHUB_ENV
+          if(!(Test-Path (Join-Path $folder 'package-lock.json'))){throw 'PACKAGE_LOCK_MISSING'}
+          $bad=@(Get-ChildItem $folder -Recurse -File -Force | Where-Object {$_.Name -match '^\.env($|\.)|^license\.key$|^connectionString\.txt$|\.pfx$|\.p12$|\.pem$|\.sqlite$|\.db$'})
+          if($bad.Count){throw 'SENSITIVE_OR_RUNTIME_FILES_PRESENT'}
+      - name: Run real code quality and unit/integration tests
+        shell: pwsh
+        run: |
+          Set-Location $env:LAB_SOURCE
+          npm ci --no-audit --no-fund
+          if($LASTEXITCODE -ne 0){throw 'NPM_CI_FAILED'}
+          npm run typecheck
+          if($LASTEXITCODE -ne 0){throw 'TYPECHECK_FAILED'}
+          npm test
+          if($LASTEXITCODE -ne 0){throw 'TESTS_FAILED'}
+          npm run lint
+          if($LASTEXITCODE -ne 0){throw 'LINT_FAILED'}
+      - name: Build and run local web application (no banking network)
+        shell: pwsh
+        env:
+          BANK_ADAPTER_MODE: disabled
+        run: |
+          Set-Location $env:LAB_SOURCE
+          npm run build
+          if($LASTEXITCODE -ne 0){throw 'PRODUCTION_BUILD_FAILED'}
+          npm run smoke
+          if($LASTEXITCODE -ne 0){throw 'REAL_HTTP_SMOKE_FAILED'}
+      - name: Verify availability of real native bridge source
+        id: native
+        shell: pwsh
+        run: |
+          $file=Join-Path $env:LAB_SOURCE 'native/MayanInterop/Program.cs'
+          if(Test-Path $file){
+            Set-Location $env:LAB_SOURCE
+            & ./scripts/build-mayan-native.ps1
+            if($LASTEXITCODE -ne 0){throw 'NATIVE_BUILD_FAILED'}
+            'buildable=true' >> $env:GITHUB_OUTPUT
+          }elseif($env:LAB_VERSION -eq 'V5_FROM_PRIVATE_RELEASE'){
+            'buildable=false' >> $env:GITHUB_OUTPUT
+            "::warning::V5 package omits native/MayanInterop/Program.cs. Full desktop build is blocked, not passed."
+            'Full V5 desktop build: BLOCKED_MISSING_NATIVE_BRIDGE' >> $env:GITHUB_STEP_SUMMARY
+          }else{
+            'buildable=true' >> $env:GITHUB_OUTPUT
+          }
+      - name: Package real Windows x64 portable EXE
+        if: steps.native.outputs.buildable == 'true'
+        shell: pwsh
+        run: |
+          Set-Location $env:LAB_SOURCE
+          node scripts/prepare-standalone.mjs
+          if($LASTEXITCODE -ne 0){throw 'PREPARE_STANDALONE_FAILED'}
+          npm exec -- electron-builder --win portable --x64 --publish never
+          if($LASTEXITCODE -ne 0){throw 'DESKTOP_PORTABLE_BUILD_FAILED'}
+      - name: Launch actual packaged EXE and check local readiness/UI
+        if: steps.native.outputs.buildable == 'true'
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/windows-vm-treasury-smoke.ps1" -SourceRoot "$env:LAB_SOURCE"
+      - name: Package genuine Windows NSIS Setup EXE
+        if: steps.native.outputs.buildable == 'true'
+        shell: pwsh
+        run: |
+          Set-Location $env:LAB_SOURCE
+          npm exec -- electron-builder --win nsis --x64 --publish never '--config.artifactName=TreasuryFlow-Setup-${version}-Windows-${arch}.${ext}'
+          if($LASTEXITCODE -ne 0){throw 'NSIS_BUILD_FAILED'}
+          $setups=@(Get-ChildItem "$env:LAB_SOURCE/release/TreasuryFlow-Setup-*-Windows-x64.exe" -ErrorAction SilentlyContinue)
+          if($setups.Count -ne 1 -or $setups[0].Length -lt 1000000){throw 'NSIS_SETUP_EXE_MISSING'}
+          'Setup EXE built; full unattended install acceptance remains a separate test.' >> $env:GITHUB_STEP_SUMMARY
+      - name: Upload private Windows artifacts and non-sensitive evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: treasuryflow-windows-build-and-evidence
+          path: |
+            ${ env.LAB_SOURCE }}/release/TreasuryFlow-*-Windows-x64.exe
+            ${ runner.temp }}/treasuryflow-vm-evidence/*.json
+          retention-days: 7
+          if-no-files-found: warn
+      - name: State safety boundary
+        if: always()
+        shell: pwsh
+        run: |
+          'Bank LIVE disabled. No production SQL connection, live payment, public release or actual customer data.' >> $env:GITHUB_STEP_SUMMARY
+          'Repository branch is NOT the user V5 unless a SHA-256-pinned private source archive was staged.' >> $env:GITHUB_STEP_SUMMARY
