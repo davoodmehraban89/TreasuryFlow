@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {isIntegrationsEditorReady} from './gui-readiness.mjs';
+import {createSyntheticIranianIban} from './synthetic-iban.mjs';
 import {spawn,execFileSync} from 'node:child_process';
 import {writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {join,basename} from 'node:path';
@@ -60,11 +61,7 @@ try{
      return x?.path===path&&x.text.includes(heading)&&!x.errorToast&&!x.text.includes('خطا در بارگذاری صفحه')?x:null;
    },30000);
  };
- const iban=(digit)=>{
-   const number='0'.repeat(23)+String(digit);
-   let mod=0;for(const d of number+'182700')mod=(mod*10+Number(d))%97;
-   return 'IR'+String(98-mod).padStart(2,'0')+number;
- };
+ const iban=createSyntheticIranianIban;
  const submit=async (page,marker,fields)=>{
    await go(page,marker);
    report.stage='native-field-entry:'+page;
