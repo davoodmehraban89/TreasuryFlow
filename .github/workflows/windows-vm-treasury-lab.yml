@@ -202,6 +202,8 @@ jobs:
                     if(-not $record.$field){$state='FINANCIAL_UI_MATRIX_INCOMPLETE';break}
                   }
                   if(@($record.visitedRoutes).Count -ne 10){$state='ROUTE_MATRIX_INCOMPLETE'}
+                  if(@($record.postRestartRoutes).Count -ne 4){$state='POST_RESTART_DATA_ROUTES_NOT_VERIFIED'}
+                  if($record.persistenceEvidenceMethod -ne 'INSTALLED_ELECTRON_HTTP_AFTER_CDP_REOPEN'){$state='PERSISTENCE_METHOD_UNVERIFIED'}
                 }
               }catch{$state='UNREADABLE'}
             }
