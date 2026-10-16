@@ -1,11 +1,6 @@
 name: TreasuryFlow Windows Direct Electron Diagnostic
 
 on:
-  push:
-    branches:
-      - ci/windows-dual-app-lab-20261016
-    paths:
-      - .github/workflows/windows-electron-diagnostic.yml
   workflow_dispatch:
 
 permissions:
