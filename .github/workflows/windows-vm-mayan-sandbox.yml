@@ -1,0 +1,67 @@
+name: Mayan isolated Windows VM executable probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      mayan_qa_tag:
+        description: "PRIVATE Release tag containing Mayan-Sanitized-QA.zip"
+        required: true
+        type: string
+      mayan_qa_sha256:
+        description: "SHA-256 of exact sanitized QA asset"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  mayan-sandbox:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Fetch pinned private artifact, reject sensitive files
+        shell: pwsh
+        env:
+          GH_TOKEN: ${ secrets.GITHUB_TOKEN }
+          QA_TAG: ${ inputs.mayan_qa_tag }
+          QA_SHA: ${ inputs.mayan_qa_sha256 }
+          REPO_NAME: ${ github.repository }
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:QA_SHA -notmatch '^[a-fA-F0-9]{64}$'){throw 'MAYAN_QA_SHA256_REQUIRED'}
+          gh release download $env:QA_TAG --repo $env:REPO_NAME --pattern Mayan-Sanitized-QA.zip --dir $env:RUNNER_TEMP --clobber
+          $zip=Join-Path $env:RUNNER_TEMP 'Mayan-Sanitized-QA.zip'
+          if((Get-FileHash $zip -Algorithm SHA256).Hash -ne $env:QA_SHA.ToUpperInvariant()){throw 'MAYAN_QA_SHA256_MISMATCH'}
+          $destination=Join-Path $env:RUNNER_TEMP 'Mayan-Sanitized-QA'
+          Expand-Archive -LiteralPath $zip -DestinationPath $destination -Force
+          $bad=@(Get-ChildItem $destination -File -Recurse -Force | Where-Object {
+            $_.Name -match '(?i)^license\.key$|^config\.json$|^connectionString\.txt$|\.xlsx$|\.pdb$|\.sqlite$|\.db$|\.pfx$|\.pem$|\.key$|\.ttf$'
+          })
+          if($bad.Count){throw 'QA_ARCHIVE_CONTAINS_SENSITIVE_FILES'}
+          $expected=@(Get-ChildItem $destination -File -Recurse|Where-Object {
+            $_.Extension -notin @('.exe','.dll','.json','.txt')
+          })
+          if($expected.Count){throw 'UNEXPECTED_QA_FILE_TYPE'}
+          "MAYAN_QA_PATH=$destination" >> $env:GITHUB_ENV
+      - name: Start the real WinForms PE with per-program outbound firewall isolation
+        shell: pwsh
+        run: |
+          & ./scripts/windows-vm-mayan-sandbox.ps1 -QaFolder $env:MAYAN_QA_PATH
+      - name: Upload sanitized evidence (not real financial data)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mayan-windows-vm-structural-evidence
+          path: ${ runner.temp }}/mayan-vm-evidence/*.json
+          retention-days: 7
+          if-no-files-found: warn
+      - name: State honest comparison boundary
+        if: always()
+        shell: pwsh
+        run: |
+          'This probes a real sanitized Mayan EXE only. Real GUI function, licensing and financial output parity remain UNVERIFIED.' >> $env:GITHUB_STEP_SUMMARY
+          'No live bank credentials, live SQL connection, customer records or real payments are used.' >> $env:GITHUB_STEP_SUMMARY
