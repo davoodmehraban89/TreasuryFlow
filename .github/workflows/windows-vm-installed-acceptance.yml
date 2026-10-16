@@ -1,0 +1,142 @@
+name: TreasuryFlow Windows Installed Native Artifact Acceptance
+
+on:
+  # Temporary single-branch trigger for the first pinned artifact validation.
+  push:
+    branches:
+      - ci/windows-dual-app-lab-20261016
+    paths:
+      - .github/workflows/windows-vm-installed-acceptance.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: treasury-native-installed-artifact
+  cancel-in-progress: false
+
+jobs:
+  installed-native-artifact:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      SOURCE_RUN_ID: '38965182060'
+      SOURCE_SHA: '0b8e85fb3765fce84e407e0e9c59f70ad901fd8a'
+      SOURCE_ARTIFACT_ID: '12075720690'
+      SOURCE_DIGEST: 'sha256:70fc35413677ee7a6eaa8698ddd3dfe7f828ce2a5af90a4a24a1364467d2401b'
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_DESKTOP_LOCAL: '1'
+      LAB_VERSION: REPO_BRANCH_NOT_V5
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Checkout exact native acceptance harness
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Node 22 for native CDP harness
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Download and pin genuine installer from previous Windows VM run
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $source=gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID" | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0){throw 'SOURCE_RUN_UNAVAILABLE'}
+          if($source.head_sha -ne $env:SOURCE_SHA){throw 'SOURCE_COMMIT_MISMATCH'}
+          if($source.repository.id -ne $source.head_repository.id){throw 'SOURCE_REPOSITORY_IDENTITY_MISMATCH'}
+          $artifact=gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$env:SOURCE_ARTIFACT_ID" | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0){throw 'SOURCE_ARTIFACT_UNAVAILABLE'}
+          if($artifact.name -ne 'treasuryflow-windows-build-and-evidence' -or $artifact.expired){throw 'UNEXPECTED_OR_EXPIRED_ARTIFACT'}
+          if($artifact.workflow_run.id -ne [long]$env:SOURCE_RUN_ID -or $artifact.workflow_run.head_sha -ne $env:SOURCE_SHA){throw 'ARTIFACT_PROVENANCE_MISMATCH'}
+          if($artifact.digest -ne $env:SOURCE_DIGEST){throw 'ARTIFACT_ZIP_DIGEST_MISMATCH'}
+          $folder=Join-Path $env:RUNNER_TEMP 'treasuryflow-pinned-source-artifact'
+          New-Item -ItemType Directory -Path $folder -Force | Out-Null
+          gh run download $env:SOURCE_RUN_ID --repo $env:GITHUB_REPOSITORY --name treasuryflow-windows-build-and-evidence --dir $folder
+          if($LASTEXITCODE -ne 0){throw 'ARTIFACT_DOWNLOAD_FAILED'}
+          $setup=@(Get-ChildItem -LiteralPath $folder -Recurse -File -Filter 'TreasuryFlow-Setup-*-Windows-x64.exe')
+          if($setup.Count -ne 1 -or $setup[0].Length -lt 1000000){throw 'REAL_NSIS_SETUP_MISSING'}
+          $original=@(Get-ChildItem -LiteralPath $folder -Recurse -File -Filter 'installed-runtime.json')
+          if($original.Count -ne 1){throw 'ORIGINAL_INSTALL_TEST_REPORT_MISSING'}
+          $prior=Get-Content $original[0].FullName -Raw | ConvertFrom-Json
+          $actualHash=(Get-FileHash $setup[0].FullName -Algorithm SHA256).Hash
+          if(!$prior.installerSha256 -or $actualHash -ne $prior.installerSha256){throw 'SETUP_SHA256_MISMATCH'}
+          $release=Join-Path $env:GITHUB_WORKSPACE 'release'
+          New-Item -ItemType Directory -Path $release -Force | Out-Null
+          Copy-Item -LiteralPath $setup[0].FullName -Destination $release -Force
+          $reportDir=Join-Path $env:RUNNER_TEMP 'treasuryflow-vm-evidence'
+          New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
+          [ordered]@{schema='treasuryflow-replayed-installer-v1';sourceRun=$env:SOURCE_RUN_ID;sourceSha=$env:SOURCE_SHA;artifactId=$env:SOURCE_ARTIFACT_ID;artifactDigest=$env:SOURCE_DIGEST;setupFile=$setup[0].Name;setupSha256=$actualHash;bankAdapter='disabled';outcome='PINNED_SOURCE_PASS'} | ConvertTo-Json | Set-Content (Join-Path $reportDir 'source-provenance.json') -Encoding utf8
+          "Pinned verified setup from run $env:SOURCE_RUN_ID SHA $env:SOURCE_SHA" >> $env:GITHUB_STEP_SUMMARY
+      - name: Install actual NSIS Setup and verify installed HTTP readiness
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/windows-vm-treasury-install-smoke.ps1" -SourceRoot "$env:GITHUB_WORKSPACE"
+      - name: Run actual installed Electron CDP native financial matrix and persistence test
+        shell: pwsh
+        run: |
+          $root=Join-Path $env:RUNNER_TEMP 'TreasuryFlow-VM-Installed'
+          $apps=@(Get-ChildItem -LiteralPath $root -Recurse -File -Filter 'TreasuryFlow.exe' -ErrorAction SilentlyContinue)
+          if($apps.Count -ne 1){throw 'ACTUAL_INSTALLED_ELECTRON_MISSING'}
+          $reports=Join-Path $env:RUNNER_TEMP 'treasuryflow-vm-evidence'
+          node "$env:GITHUB_WORKSPACE/qa/windows/electron-native-gui-smoke.mjs" $apps[0].FullName $reports
+          if($LASTEXITCODE -ne 0){throw 'NATIVE_FINANCIAL_CDP_MATRIX_FAILED'}
+      - name: Real NSIS silent uninstall
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/windows-vm-treasury-uninstall-smoke.ps1" -InstalledFolder (Join-Path $env:RUNNER_TEMP 'TreasuryFlow-VM-Installed')
+      - name: Independently aggregate required acceptance evidence
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $folder=Join-Path $env:RUNNER_TEMP 'treasuryflow-vm-evidence'
+          New-Item -ItemType Directory -Path $folder -Force | Out-Null
+          $matrix=@(
+            @{file='source-provenance.json';status='PINNED_SOURCE_PASS';label='source'},
+            @{file='installed-runtime.json';status='NSIS_INSTALL_AND_INSTALLED_RUNTIME_PASS';label='install'},
+            @{file='treasuryflow-native-gui.json';status='REAL_INSTALLED_ELECTRON_GUI_PASS';label='native_ui'},
+            @{file='uninstall-runtime.json';status='NSIS_REAL_UNINSTALL_PASS';label='uninstall'}
+          )
+          $checks=@()
+          foreach($rule in $matrix){
+            $result='MISSING'
+            $path=Join-Path $folder $rule.file
+            if(Test-Path $path){
+              try{
+                $record=Get-Content $path -Raw | ConvertFrom-Json
+                $result=if($record.outcome -eq $rule.status){'PASS'}else{'INCOMPLETE'}
+                if($result -eq 'PASS' -and $rule.label -eq 'native_ui'){
+                  $fields=@('localEntry','cdp','localOrigin','integrations','queryEditor','copyQuery','copyExactlyEditedSql','syntheticAccount','syntheticBeneficiary','syntheticDraft','appReopened','durableData','auditPersisted','screenshot')
+                  foreach($field in $fields){if(-not $record.$field){$result='NATIVE_MATRIX_INCOMPLETE';break}}
+                  if(@($record.visitedRoutes).Count -ne 10){$result='NAVIGATION_NOT_VERIFIED'}
+                }
+              }catch{$result='INVALID_REPORT'}
+            }
+            $checks+=@{name=$rule.label;result=$result;file=$rule.file}
+          }
+          $verified=(@($checks | Where-Object {$_.result -ne 'PASS'}).Count -eq 0)
+          $proof=[ordered]@{schema='treasuryflow-replayed-native-acceptance-v1';runId=$env:GITHUB_RUN_ID;currentSha=$env:GITHUB_SHA;runnerOS=$env:RUNNER_OS;sourceRun=$env:SOURCE_RUN_ID;sourceSha=$env:SOURCE_SHA;windowsAcceptance=if($verified){'PASS'}else{'NOT_VERIFIED'};upgrade='NOT_VERIFIED_NO_PREVIOUS_BASELINE';authenticatedLogin='NOT_TESTED_LOCAL_ENTRY_LINK_ONLY';bankAdapter='disabled';checks=$checks}
+          $proof | ConvertTo-Json -Depth 7 | Set-Content (Join-Path $folder 'native-acceptance-verification.json') -Encoding UTF8
+          "Installed native acceptance: $($proof.windowsAcceptance)" >> $env:GITHUB_STEP_SUMMARY
+          if(!$verified){throw 'INSTALLED_NATIVE_ACCEPTANCE_INCOMPLETE'}
+      - name: Upload synthetic JSON and non-sensitive screenshot evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: treasuryflow-installed-native-acceptance-evidence
+          path: |
+            ${{ runner.temp }}/treasuryflow-vm-evidence/*.json
+            ${{ runner.temp }}/treasuryflow-vm-evidence/*.png
+          retention-days: 7
+          if-no-files-found: warn
+      - name: State bounded scope
+        if: always()
+        shell: pwsh
+        run: |
+          'Actual Windows NSIS + installed Electron CDP tested only against a pinned public-branch build and synthetic data.' >> $env:GITHUB_STEP_SUMMARY
+          'No bank LIVE, customer data, production SQL, private V5 asset, public release, authenticated-login claim or upgrade claim.' >> $env:GITHUB_STEP_SUMMARY
