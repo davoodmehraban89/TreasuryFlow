@@ -1,6 +1,12 @@
 name: TreasuryFlow Windows Installed Native Artifact Acceptance
 
 on:
+  # Single Windows native test using length- and checksum-validated IBAN fixtures.
+  push:
+    branches:
+      - ci/windows-dual-app-lab-20261016
+    paths:
+      - .github/workflows/windows-vm-installed-acceptance.yml
   workflow_dispatch:
 
 permissions:
