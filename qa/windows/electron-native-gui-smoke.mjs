@@ -68,7 +68,26 @@ try{
  const submit=async (page,marker,fields)=>{
    await go(page,marker);
    await conn.evaluate('window.__vmSynthetic='+JSON.stringify(fields));
-   return conn.evaluate("(()=>{const form=document.querySelector('main form');if(!form)return 'NO_FORM';for(const [k,v] of Object.entries(window.__vmSynthetic)){const el=form.elements.namedItem(k);if(!el)return 'MISSING_'+k;if(el.type==='checkbox'){el.checked=Boolean(v);}else if(el.tagName==='SELECT'){el.value=v==='@FIRST'?[...el.options].find(o=>o.value)?.value||'':String(v);}else{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,String(v));}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}if(!form.reportValidity())return 'INVALID_FORM';form.requestSubmit();return 'SUBMITTED';})()");
+   const submitted=await conn.evaluate("(()=>{const form=document.querySelector('main form');if(!form)return 'NO_FORM';for(const [k,v] of Object.entries(window.__vmSynthetic)){const el=form.elements.namedItem(k);if(!el)return 'MISSING_'+k;if(el.type==='checkbox'){el.checked=Boolean(v);}else if(el.tagName==='SELECT'){el.value=v==='@FIRST'?[...el.options].find(o=>o.value)?.value||'':String(v);}else{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,String(v));}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}if(!form.reportValidity())return 'INVALID_FORM';form.requestSubmit();return 'SUBMITTED';})()");
+   if(submitted!=='SUBMITTED')return submitted;
+   // Next Server Actions can close or replace the CDP target on redirect.
+   // Follow the browser's actual URL, then attach to its current target.
+   report.stage='native-post-action:'+page;
+   const redirected=await wait(async()=>{
+     const response=await fetch('http://127.0.0.1:'+port+'/json/list',{signal:AbortSignal.timeout(1500)});
+     if(!response.ok)return null;
+     const pages=await response.json();
+     return pages.find(x=>x.type==='page'&&x.webSocketDebuggerUrl&&(
+       page==='/payments/new'
+        ? x.url?.startsWith(origin+'/payments/')&&!x.url?.startsWith(origin+'/payments/new')
+        : x.url?.startsWith(origin+page+'?')
+     ))||null;
+   },45000);
+   if(redirected.url.includes('error='))throw Error('NATIVE_FORM_SERVER_ACTION_REJECTED_'+page);
+   try{conn.ws.close()}catch{}
+   conn=await connect(redirected.webSocketDebuggerUrl);
+   report.cdpReconnections++;
+   return submitted;
  };
  await go('/login','ورود به محیط محلی امن');
  assert(await conn.evaluate("(()=>{const a=document.querySelector('a[href=\"/dashboard\"]');if(!a)return false;a.click();return true;})()"),'NATIVE_LOCAL_ENTRY_MISSING');
