@@ -1,6 +1,12 @@
 name: TreasuryFlow Windows Installed Native Artifact Acceptance
 
 on:
+  # One-shot real installed CDP server-action redirect acceptance.
+  push:
+    branches:
+      - ci/windows-dual-app-lab-20261016
+    paths:
+      - .github/workflows/windows-vm-installed-acceptance.yml
   workflow_dispatch:
 
 permissions:
