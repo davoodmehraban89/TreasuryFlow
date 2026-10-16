@@ -1,12 +1,6 @@
 name: TreasuryFlow Windows VM Build & Real Runtime Lab
 
 on:
-  # One-off Windows full installer & GUI acceptance after target-specific NSIS naming.
-  push:
-    branches:
-      - ci/windows-dual-app-lab-20261016
-    paths:
-      - .github/workflows/windows-vm-treasury-lab.yml
   workflow_dispatch:
     inputs:
       v5_source_tag:
