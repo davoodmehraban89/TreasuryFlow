@@ -1,8 +1,6 @@
 name: TreasuryFlow Windows VM Build & Real Runtime Lab
 
 on:
-  push:
-    branches: [ci/windows-dual-app-lab-20261016]
   workflow_dispatch:
     inputs:
       v5_source_tag:
