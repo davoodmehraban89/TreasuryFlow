@@ -223,8 +223,9 @@ jobs:
           $proof | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $folder 'verification.json') -Encoding UTF8
           "Evidence run: $($proof.run_url)" >> $env:GITHUB_STEP_SUMMARY
           "Head SHA: $env:GITHUB_SHA; runner OS: $env:RUNNER_OS; acceptance: $($proof.windows_acceptance)" >> $env:GITHUB_STEP_SUMMARY
-      - name: Upload private Windows artifacts and non-sensitive evidence
-        if: always()
+      - name: Upload synthetic branch-only Windows artifacts and non-sensitive evidence
+        # This repository is PUBLIC. Never upload a V5 archive-derived binary.
+        if: always() && (github.event_name == 'push' || inputs.v5_source_tag == '')
         uses: actions/upload-artifact@v4
         with:
           name: treasuryflow-windows-build-and-evidence
