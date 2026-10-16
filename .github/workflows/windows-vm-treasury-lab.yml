@@ -1,6 +1,12 @@
 name: TreasuryFlow Windows VM Build & Real Runtime Lab
 
 on:
+  # One-time CI validation of portable child-process handling.
+  push:
+    branches:
+      - ci/windows-dual-app-lab-20261016
+    paths:
+      - .github/workflows/windows-vm-treasury-lab.yml
   workflow_dispatch:
     inputs:
       v5_source_tag:
