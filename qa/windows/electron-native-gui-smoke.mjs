@@ -68,7 +68,7 @@ try{
  const submit=async (page,marker,fields)=>{
    await go(page,marker);
    await conn.evaluate('window.__vmSynthetic='+JSON.stringify(fields));
-   const submitted=await conn.evaluate("(()=>{const form=document.querySelector('main form');if(!form)return 'NO_FORM';for(const [k,v] of Object.entries(window.__vmSynthetic)){const el=form.elements.namedItem(k);if(!el)return 'MISSING_'+k;if(el.type==='checkbox'){el.checked=Boolean(v);}else if(el.tagName==='SELECT'){el.value=v==='@FIRST'?[...el.options].find(o=>o.value)?.value||'':String(v);}else{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,String(v));}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}if(!form.reportValidity())return 'INVALID_FORM';form.requestSubmit();return 'SUBMITTED';})()");
+   const submitted=await conn.evaluate("(()=>{const form=document.querySelector('main form');if(!form)return 'NO_FORM';for(const [k,v] of Object.entries(window.__vmSynthetic)){const el=form.elements.namedItem(k);if(!el)return 'MISSING_'+k;if(el.type==='checkbox'){el.checked=Boolean(v);}else if(el.tagName==='SELECT'){el.value=v==='@FIRST'?[...el.options].find(o=>o.value)?.value||'':String(v);}else{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,String(v));}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}if(!form.reportValidity())return 'INVALID_FORM';setTimeout(()=>form.requestSubmit(),50);return 'SUBMITTED';})()");
    if(submitted!=='SUBMITTED')return submitted;
    // Next Server Actions can close or replace the CDP target on redirect.
    // Follow the browser's actual URL, then attach to its current target.
