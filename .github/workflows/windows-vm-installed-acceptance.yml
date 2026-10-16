@@ -110,7 +110,7 @@ jobs:
                 $record=Get-Content $path -Raw | ConvertFrom-Json
                 $result=if($record.outcome -eq $rule.status){'PASS'}else{'INCOMPLETE'}
                 if($result -eq 'PASS' -and $rule.label -eq 'native_ui'){
-                  $fields=@('localEntry','cdp','localOrigin','integrations','queryEditor','copyQuery','copyExactlyEditedSql','syntheticAccount','syntheticBeneficiary','syntheticDraft','appReopened','durableData','auditPersisted','screenshot')
+                  $fields=@('preLaunchPortClear','localEntry','cdp','localOrigin','integrations','queryEditor','copyQuery','copyExactlyEditedSql','syntheticAccount','syntheticBeneficiary','syntheticDraft','appReopened','durableData','auditPersisted','screenshot')
                   foreach($field in $fields){if(-not $record.$field){$result='NATIVE_MATRIX_INCOMPLETE';break}}
                   if(@($record.visitedRoutes).Count -ne 10){$result='NAVIGATION_NOT_VERIFIED'}
                   if(@($record.postRestartRoutes).Count -ne 4){$result='POST_RESTART_DATA_ROUTES_NOT_VERIFIED'}
