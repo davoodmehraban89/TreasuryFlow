@@ -1,6 +1,12 @@
 name: TreasuryFlow Windows Installed Native Artifact Acceptance
 
 on:
+  # One-time full NSIS native acceptance with verified uninstall and synthetic data.
+  push:
+    branches:
+      - ci/windows-dual-app-lab-20261016
+    paths:
+      - .github/workflows/windows-vm-installed-acceptance.yml
   workflow_dispatch:
 
 permissions:
