@@ -10,7 +10,7 @@ assert(exe&&existsSync(exe),'real installed TreasuryFlow.exe required');
 assert(reportDir,'evidence output directory required');
 mkdirSync(reportDir,{recursive:true});
 const port=9345;
-const report={mode:'REAL_INSTALLED_ELECTRON_CDP',exe:basename(exe),cdp:false,localOrigin:false,integrations:false,queryEditor:false,copyQuery:false,copyExactlyEditedSql:false,clipboardMode:'INTERCEPTED_API_NOT_WINDOWS_CLIPBOARD',screenshot:false,stage:'connect',cdpReconnections:0,localEntry:false,visitedRoutes:[],syntheticAccount:false,syntheticBeneficiary:false,syntheticDraft:false,appReopened:false,persistenceEvidenceMethod:'NOT_RUN',postRestartRoutes:[],durableData:false,auditPersisted:false,upgrade:'NOT_RUN_NO_BASELINE',outcome:'NOT_RUN'};
+const report={mode:'REAL_INSTALLED_ELECTRON_CDP',exe:basename(exe),cdp:false,localOrigin:false,integrations:false,queryEditor:false,copyQuery:false,copyExactlyEditedSql:false,clipboardMode:'INTERCEPTED_API_NOT_WINDOWS_CLIPBOARD',screenshot:false,preLaunchPortClear:false,stage:'connect',cdpReconnections:0,localEntry:false,visitedRoutes:[],syntheticAccount:false,syntheticBeneficiary:false,syntheticDraft:false,appReopened:false,persistenceEvidenceMethod:'NOT_RUN',postRestartRoutes:[],durableData:false,auditPersisted:false,upgrade:'NOT_RUN_NO_BASELINE',outcome:'NOT_RUN'};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function wait(fn,timeout=75000){let error;const until=Date.now()+timeout;while(Date.now()<until){try{const x=await fn();if(x)return x;}catch(e){error=e;}await sleep(400);}throw error||Error('CDP_WAIT_TIMEOUT');}
 async function connect(url){
@@ -33,6 +33,9 @@ async function connect(url){
 let proc,conn;
 try{
  const env={...process.env,BANK_ADAPTER_MODE:'disabled',TREASURYFLOW_DESKTOP_LOCAL:'1',TREASURYFLOW_DATA_FILE:join(reportDir,'vm-only-treasuryflow.sqlite')};
+ const previousPortOpen=await fetch('http://127.0.0.1:3210/api/ready',{signal:AbortSignal.timeout(1800)}).then(()=>true,()=>false);
+ assert(!previousPortOpen,'STALE_LOCAL_SERVER_PRESENT_BEFORE_INSTALLED_GUI_TEST');
+ report.preLaunchPortClear=true;
  proc=spawn(exe,['--remote-debugging-port='+port,'--remote-allow-origins=*'],{env,stdio:'ignore',windowsHide:false});
  const target=await wait(async()=>{const r=await fetch('http://127.0.0.1:'+port+'/json/list',{signal:AbortSignal.timeout(1500)});
  if(!r.ok)return null;const pages=await r.json();
