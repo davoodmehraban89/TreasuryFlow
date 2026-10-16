@@ -30,10 +30,10 @@ jobs:
       - name: Stage optional reviewed V5 sources with SHA-256 verification
         shell: pwsh
         env:
-          GH_TOKEN: ${ secrets.GITHUB_TOKEN }
-          SOURCE_TAG: ${ inputs.v5_source_tag }
-          SOURCE_SHA: ${ inputs.v5_sha256 }
-          REPO_NAME: ${ github.repository }
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_TAG: ${{ inputs.v5_source_tag }}
+          SOURCE_SHA: ${{ inputs.v5_sha256 }}
+          REPO_NAME: ${{ github.repository }}
         run: |
           $ErrorActionPreference='Stop'
           $folder=$env:GITHUB_WORKSPACE
@@ -131,8 +131,8 @@ jobs:
         with:
           name: treasuryflow-windows-build-and-evidence
           path: |
-            ${ env.LAB_SOURCE }}/release/TreasuryFlow-*-Windows-x64.exe
-            ${ runner.temp }}/treasuryflow-vm-evidence/*.json
+            ${{ env.LAB_SOURCE }}}/release/TreasuryFlow-*-Windows-x64.exe
+            ${{ runner.temp }}}/treasuryflow-vm-evidence/*.json
           retention-days: 7
           if-no-files-found: warn
       - name: State safety boundary
