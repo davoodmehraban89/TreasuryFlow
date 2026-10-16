@@ -109,20 +109,27 @@ jobs:
           }else{
             'buildable=true' >> $env:GITHUB_OUTPUT
           }
-      - name: Package real Windows x64 portable EXE
+      - name: Prepare real unpacked Electron without slow portable packaging
         if: steps.native.outputs.buildable == 'true'
         shell: pwsh
         run: |
           Set-Location $env:LAB_SOURCE
           node scripts/prepare-standalone.mjs
           if($LASTEXITCODE -ne 0){throw 'PREPARE_STANDALONE_FAILED'}
-          npm exec -- electron-builder --win portable --x64 --publish never
-          if($LASTEXITCODE -ne 0){throw 'DESKTOP_PORTABLE_BUILD_FAILED'}
+          npm exec -- electron-builder --dir --win --x64 --publish never
+          if($LASTEXITCODE -ne 0){throw 'UNPACKED_ELECTRON_BUILD_FAILED'}
       - name: Probe real unpacked Electron EXE before the portable bootstrapper
         if: steps.native.outputs.buildable == 'true'
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE/scripts/windows-vm-unpacked-smoke.ps1" -SourceRoot "$env:LAB_SOURCE"
+      - name: Package real Windows x64 portable EXE
+        if: steps.native.outputs.buildable == 'true'
+        shell: pwsh
+        run: |
+          Set-Location $env:LAB_SOURCE
+          npm exec -- electron-builder --win portable --x64 --publish never
+          if($LASTEXITCODE -ne 0){throw 'DESKTOP_PORTABLE_BUILD_FAILED'}
       - name: Launch actual packaged EXE and check local readiness/UI
         if: steps.native.outputs.buildable == 'true'
         shell: pwsh
