@@ -28,6 +28,7 @@ try {
  $report.executablePresent=$true
  $env:BANK_ADAPTER_MODE='disabled'
  $env:TREASURYFLOW_DESKTOP_LOCAL='1'
+ $env:TREASURYFLOW_VM_DIAGNOSTICS='1'
  $env:TREASURYFLOW_DATA_FILE=Join-Path $evidenceDir 'unpacked-synthetic.sqlite'
  $p=Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
  $report.launched=$true
