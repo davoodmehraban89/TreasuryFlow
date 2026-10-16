@@ -1,0 +1,22 @@
+name: Mayan isolated Windows VM executable probe
+
+# Default-branch discovery entrypoint only. The isolated lab lives on the feature branch.
+on:
+  workflow_dispatch:
+    inputs:
+      mayan_qa_tag:
+        description: 'PRIVATE Release tag containing Mayan-Sanitized-QA.zip'
+        required: true
+        type: string
+      mayan_qa_sha256:
+        description: 'SHA-256 of exact sanitized QA asset'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  never-run-from-main:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Select ci/windows-dual-app-lab-20261016 in the Run workflow branch selector.'
