@@ -26,10 +26,10 @@ jobs:
       - name: Fetch pinned private artifact, reject sensitive files
         shell: pwsh
         env:
-          GH_TOKEN: ${ secrets.GITHUB_TOKEN }
-          QA_TAG: ${ inputs.mayan_qa_tag }
-          QA_SHA: ${ inputs.mayan_qa_sha256 }
-          REPO_NAME: ${ github.repository }
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          QA_TAG: ${{ inputs.mayan_qa_tag }}
+          QA_SHA: ${{ inputs.mayan_qa_sha256 }}
+          REPO_NAME: ${{ github.repository }}
         run: |
           $ErrorActionPreference='Stop'
           if($env:QA_SHA -notmatch '^[a-fA-F0-9]{64}$'){throw 'MAYAN_QA_SHA256_REQUIRED'}
@@ -56,7 +56,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mayan-windows-vm-structural-evidence
-          path: ${ runner.temp }}/mayan-vm-evidence/*.json
+          path: ${{ runner.temp }}}/mayan-vm-evidence/*.json
           retention-days: 7
           if-no-files-found: warn
       - name: State honest comparison boundary
