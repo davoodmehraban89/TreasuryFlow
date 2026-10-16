@@ -1,0 +1,94 @@
+name: TreasuryFlow Windows Direct Electron Diagnostic
+
+on:
+  push:
+    branches:
+      - ci/windows-dual-app-lab-20261016
+    paths:
+      - .github/workflows/windows-electron-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  electron-startup:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_DESKTOP_LOCAL: '1'
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Build local-only Next application without packaging
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          npm ci --no-audit --no-fund
+          if($LASTEXITCODE -ne 0){throw 'NPM_CI_FAILED'}
+          npm run build
+          if($LASTEXITCODE -ne 0){throw 'NEXT_BUILD_FAILED'}
+          node scripts/prepare-standalone.mjs
+          if($LASTEXITCODE -ne 0){throw 'STANDALONE_PREPARATION_FAILED'}
+      - name: Start direct Electron executable and capture sanitized failure evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Join-Path $env:GITHUB_WORKSPACE 'node_modules/electron/dist/electron.exe'
+          $stdout=Join-Path $env:RUNNER_TEMP 'tf-electron-direct.stdout'
+          $stderr=Join-Path $env:RUNNER_TEMP 'tf-electron-direct.stderr'
+          $env:TREASURYFLOW_DATA_FILE=Join-Path $env:RUNNER_TEMP 'tf-direct-test.sqlite'
+          $report=[ordered]@{schema='treasuryflow-electron-direct-v1';os=$env:RUNNER_OS;run=$env:GITHUB_RUN_ID;head=$env:GITHUB_SHA;exeFound=$false;processLaunched=$false;exitCode=$null;readiness=$false;bankDisabled=$false;stdoutSize=0;stderrSize=0;stderrIndicators=@();outcome='NOT_RUN'}
+          $p=$null
+          try {
+            if(!(Test-Path $exe)){throw 'ELECTRON_BINARY_MISSING'}
+            $report.exeFound=$true
+            $p=Start-Process -FilePath $exe -ArgumentList @('.') -WorkingDirectory $env:GITHUB_WORKSPACE -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            $report.processLaunched=$true
+            $deadline=[DateTime]::UtcNow.AddSeconds(45)
+            while([DateTime]::UtcNow -lt $deadline) {
+              Start-Sleep -Milliseconds 700
+              $p.Refresh()
+              if($p.HasExited){$report.exitCode=$p.ExitCode;throw ('DIRECT_ELECTRON_EXIT_'+$p.ExitCode)}
+              try {
+                $resp=Invoke-RestMethod 'http://127.0.0.1:3210/api/ready' -TimeoutSec 2
+                if($resp.status -eq 'ready' -and $resp.bankAdapter -eq 'disabled'){$report.readiness=$true;$report.bankDisabled=$true;break}
+              }catch{}
+            }
+            if(!$report.readiness){throw 'DIRECT_ELECTRON_READINESS_TIMEOUT'}
+            $report.outcome='DIRECT_ELECTRON_PROCESS_AND_HTTP_PASS'
+          }catch{
+            $report.outcome='FAILED'
+            $report.failureCode=$_.Exception.Message
+          }finally{
+            if($p -and !$p.HasExited){try{& taskkill.exe /T /F /PID $p.Id | Out-Null}catch{}}
+            if(Test-Path $stdout){$report.stdoutSize=(Get-Item $stdout).Length}
+            if(Test-Path $stderr){
+              $report.stderrSize=(Get-Item $stderr).Length
+              $raw=Get-Content $stderr -Raw -ErrorAction SilentlyContinue
+              $report.stderrIndicators=@('MODULE_NOT_FOUND','ERR_MODULE_NOT_FOUND','ENOENT','EPERM','EACCES','EADDRINUSE','cannot','failed','error') | Where-Object {$raw -match [regex]::Escape($_)}
+              $safe=@(Get-Content $stderr -Tail 12 -ErrorAction SilentlyContinue | Where-Object {$_ -match '(?i)(error|module|failed|cannot|ENOENT|electron)'})
+              foreach($line in $safe){
+                $scrubbed=$line -replace '(?i)(secret|token|password)\s*[:=]\s*\S+','$1=[REDACTED]'
+                if($scrubbed.Length -gt 250){$scrubbed=$scrubbed.Substring(0,250)}
+                Write-Host ('Electron diagnostic: '+$scrubbed)
+              }
+            }
+            $report | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $env:GITHUB_WORKSPACE 'treasuryflow-electron-diagnostic.json') -Encoding UTF8
+          }
+          if($report.outcome -ne 'DIRECT_ELECTRON_PROCESS_AND_HTTP_PASS'){throw $report.failureCode}
+      - name: Upload sanitized startup evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: treasuryflow-electron-direct-diagnostic
+          path: treasuryflow-electron-diagnostic.json
+          retention-days: 3
+          if-no-files-found: warn
