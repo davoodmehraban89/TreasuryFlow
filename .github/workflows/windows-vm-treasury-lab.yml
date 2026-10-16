@@ -145,10 +145,13 @@ jobs:
         shell: pwsh
         run: |
           Set-Location $env:LAB_SOURCE
-          npm exec -- electron-builder --win nsis --x64 --publish never '--config.artifactName=TreasuryFlow-Setup-${version}-Windows-${arch}.${ext}'
+          npm exec -- electron-builder --win nsis --x64 --publish never
           if($LASTEXITCODE -ne 0){throw 'NSIS_BUILD_FAILED'}
           $setups=@(Get-ChildItem "$env:LAB_SOURCE/release/TreasuryFlow-Setup-*-Windows-x64.exe" -ErrorAction SilentlyContinue)
           if($setups.Count -ne 1 -or $setups[0].Length -lt 1000000){throw 'NSIS_SETUP_EXE_MISSING'}
+          $portables=@(Get-ChildItem "$env:LAB_SOURCE/release/TreasuryFlow-*-Windows-x64.exe" -File | Where-Object {$_.Name -notlike '*Setup*'})
+          if($portables.Count -ne 1){throw 'PORTABLE_ARTIFACT_WAS_OVERWRITTEN'}
+          if((Get-FileHash $portables[0].FullName -Algorithm SHA256).Hash -eq (Get-FileHash $setups[0].FullName -Algorithm SHA256).Hash){throw 'SETUP_PORTABLE_COLLISION'}
           'Setup EXE built; full unattended install acceptance remains a separate test.' >> $env:GITHUB_STEP_SUMMARY
       - name: Silent-install genuine NSIS Setup and run its installed EXE
         if: steps.native.outputs.buildable == 'true'
