@@ -118,6 +118,11 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'PREPARE_STANDALONE_FAILED'}
           npm exec -- electron-builder --win portable --x64 --publish never
           if($LASTEXITCODE -ne 0){throw 'DESKTOP_PORTABLE_BUILD_FAILED'}
+      - name: Probe real unpacked Electron EXE before the portable bootstrapper
+        if: steps.native.outputs.buildable == 'true'
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/windows-vm-unpacked-smoke.ps1" -SourceRoot "$env:LAB_SOURCE"
       - name: Launch actual packaged EXE and check local readiness/UI
         if: steps.native.outputs.buildable == 'true'
         shell: pwsh
@@ -155,6 +160,7 @@ jobs:
           $folder=Join-Path $env:RUNNER_TEMP 'treasuryflow-vm-evidence'
           New-Item -ItemType Directory -Path $folder -Force | Out-Null
           $checks=@(
+            @{file='unpacked-runtime.json';pass='UNPACKED_ELECTRON_HTTP_AND_PROCESS_PASS';check='unpacked_process'},
             @{file='runtime.json';pass='PACKAGED_PROCESS_AND_HTTP_PASS';check='packaged_runtime'},
             @{file='installed-runtime.json';pass='NSIS_INSTALL_AND_INSTALLED_RUNTIME_PASS';check='nsis_installed_runtime'},
             @{file='treasuryflow-native-gui.json';pass='REAL_INSTALLED_ELECTRON_GUI_PASS';check='installed_gui'}
