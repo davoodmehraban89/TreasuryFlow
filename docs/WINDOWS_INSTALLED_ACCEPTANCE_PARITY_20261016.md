@@ -45,3 +45,22 @@ A passing unit test or successful EXE build does **not** prove installed native 
 - Never upload SQLite, secrets, credential-bearing content or real account data. Evidence is structured JSON and screenshots of non-sensitive synthetic UI.
 - The default branch is not modified by this implementation; no public release is authorized. Temporary branch-scoped push triggers must be removed after use.
 - Installed tests are allowed to fail safely and record incomplete evidence. Do not manufacture a pass or silently downgrade gates.
+
+
+## Successful pinned Windows installed-native acceptance — run 38977925277
+
+**Observed official GitHub Actions result:** [Run 38977925277](https://github.com/davoodmehraban89/TreasuryFlow/actions/runs/38977925277) completed with `conclusion=success`, on actual hosted Windows Runner `1000009745`. Harness/test commit was `7f5283bd0f8041679dadd3a9b261ed2d94cc2261`. The unchanged pinned `TreasuryFlow 0.1.0` NSIS installer came from build Run `38965182060`, source commit `0b8e85fb3765fce84e407e0e9c59f70ad901fd8a`. Source artifact ZIP SHA-256: `70fc35413677ee7a6eaa8698ddd3dfe7f828ce2a5af90a4a24a1364467d2401b` (without prefix), installer SHA-256 `F4EE8F43D1CBF1181B94B525770A8101E6073486676E7AA54D075AB8CBCC2606`.
+
+**Independently downloaded and read actual report JSON** from public-branch GitHub Actions Artifact ID `12079817255`, `treasuryflow-installed-native-acceptance-evidence`, ZIP digest `sha256:40f89fea5aa4bf155fb4f04c4c8f2a871af046a329fdd88cd4a6f1be13a101`; artifact expires 2026-10-23 22:50 UTC.
+
+- `source-provenance.json`: **PINNED_SOURCE_PASS**, exact build Run/commit, artifact and installer checksum.
+- `installed-runtime.json`: **NSIS_INSTALL_AND_INSTALLED_RUNTIME_PASS**; real silent install took 72.6 seconds; executable launched and served HTTP with `bankAdapter=disabled`, local port was confirmed free after cleanup.
+- `treasuryflow-native-gui.json`: **REAL_INSTALLED_ELECTRON_GUI_PASS**; genuine installed Electron window / CDP connection, local entry link, all ten app routes, SQL clipboard API interception, synthetic account + whitelisted beneficiary + draft payment; the Electron app was shut down and restarted, then persisted records and audit entries were verified on four installed-local Next.js HTTP pages (account, beneficiary, payment, audit); no Windows clipboard claim.
+- `uninstall-runtime.json`: **NSIS_REAL_UNINSTALL_PASS**; genuine NSIS uninstaller exited 0; installed EXE was physically absent after 3.0 seconds.
+- `native-acceptance-verification.json`: `windowsAcceptance=PASS` and all four checks `PASS`, tied to the same test run and source SHA.
+
+**Acceptance limits:** This validates only the **repo branch build of TreasuryFlow v0.1.0** and the installed Windows x64 flow. It does NOT validate the missing genuine V5 native bridge, Mayan executable parity, password-authenticated login (the current /login is a local entry link), actual Windows OS clipboard, production finance/bank LIVE calls, private customer data, in-place upgrades across versions or a public production release. Do not derive such claims from this green CI run.
+
+**Reliability corrections validated by the final run:** clean orphaned Electron processes and free localhost port before CDP, verify 26-character checksum-valid synthetic Iranian IBANs, perform actual CDP text entry rather than mutating React inputs, retain synthetic data in a dedicated SQLite file across native restart, and poll for actual NSIS uninstaller removal. The workflow uses a manually selected feature branch after the temporary one-shot trigger was reverted. No merge to `main`, bank LIVE setting, private V5 upload or public release was performed.
+
+**Next release gate:** obtain a verified complete V5 source/native bridge, define and pin a prior compatible installer for version-upgrade evidence, implement actual authentication only after separate requirements approval, and run a fresh Windows VM acceptance on those specific versioned artifacts. Current `0.1.0` acceptance is reproducible via `.github/workflows/windows-vm-installed-acceptance.yml` while pinned Artifact ID `12075720690` remains available; it must not be represented as a V5 release.
