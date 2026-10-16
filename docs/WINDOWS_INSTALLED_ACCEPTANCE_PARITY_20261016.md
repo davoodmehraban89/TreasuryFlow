@@ -64,3 +64,20 @@ A passing unit test or successful EXE build does **not** prove installed native 
 **Reliability corrections validated by the final run:** clean orphaned Electron processes and free localhost port before CDP, verify 26-character checksum-valid synthetic Iranian IBANs, perform actual CDP text entry rather than mutating React inputs, retain synthetic data in a dedicated SQLite file across native restart, and poll for actual NSIS uninstaller removal. The workflow uses a manually selected feature branch after the temporary one-shot trigger was reverted. No merge to `main`, bank LIVE setting, private V5 upload or public release was performed.
 
 **Next release gate:** obtain a verified complete V5 source/native bridge, define and pin a prior compatible installer for version-upgrade evidence, implement actual authentication only after separate requirements approval, and run a fresh Windows VM acceptance on those specific versioned artifacts. Current `0.1.0` acceptance is reproducible via `.github/workflows/windows-vm-installed-acceptance.yml` while pinned Artifact ID `12075720690` remains available; it must not be represented as a V5 release.
+
+
+## Accepted actual Windows VM native acceptance evidence
+
+**Verified acceptance (public-feature-branch code, synthetic fixture only):**
+
+- Source installer: `TreasuryFlow-Setup-0.1.0-Windows-x64.exe` built from GitHub Actions run [38965182060](https://github.com/davoodmehraban89/TreasuryFlow/actions/runs/38965182060), source SHA `0b8e85fb3765fce84e407e0e9c59f70ad901fd8a`.
+- Installer SHA-256 checked by Windows VM: `F4EE8F43D1CBF1181B94B525770A8101E6073486676E7AA54D075AB8CBCC2606`; pinned source artifact `12075720690`, download digest `sha256:70fc35413677ee7a6eaa8698ddd3dfe7f828ce2a5af90a4a24a1364467d2401b`.
+- Full installed acceptance **PASS** in [Run 38977925277](https://github.com/davoodmehraban89/TreasuryFlow/actions/runs/38977925277) with test-harness SHA `7f5283bd0f8041679dadd3a9b261ed2d94cc2261`, runner Windows. Independent evidence artifact `12079817255`, archive digest `sha256:40f89fea5aa4bf155fb4f04c4c8f2a871af046a329fdd88cd4a6f1be13a101`.
+- Examined each JSON evidence report: `source-provenance.json`, `installed-runtime.json`, `treasuryflow-native-gui.json`, `uninstall-runtime.json`, and `native-acceptance-verification.json`. Final `windowsAcceptance=PASS`; every one of the four independent checks is `PASS`.
+- Real silent NSIS installation completed in **72.6 seconds**, installed EXE launched, local HTTP returned ready with `bankAdapter=disabled`, and port 3210 was freed between install and GUI probes.
+- Real installed Electron CDP passed **10 routes**, local entry link, synthetic account/whitelisted beneficiary/payment **DRAFT**, edited SQL text delivered to an **intercepted browser clipboard API** (not physical Windows clipboard), synthetic screenshot and navigation.
+- The native application was exited and reopened and persisted synthetic data was checked through **4 Next.js HTTP routes** (accounts, beneficiaries, payments, audit) on the reopened installed application; `durableData=true`, `auditPersisted=true`.
+- **Real NSIS uninstallation** exited `0`; `TreasuryFlow.exe` was physically absent after **3.0 seconds**, with `outcome=NSIS_REAL_UNINSTALL_PASS`.
+- This is acceptance of the **exact source installer and test-harness SHA above**. Subsequent optional CI-harness robustness changes do not inherit PASS until independently rerun. No automatic further run was required after the verified passing evidence was found.
+- **Not verified:** genuine V5 native bridge or master source; cross-version upgrade or rollback (no verified prior installer); authenticated password login/RBAC; live banking; physical Windows clipboard; physical printing; operational customer backup; full production deployment.
+- TreasuryFlow remains **Electron + Next.js**; the Factor-easyPro Tauri/WebView2 architecture was not copied or migrated. The existing `main` branch was not merged or released during this work.
