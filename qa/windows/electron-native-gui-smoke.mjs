@@ -8,7 +8,7 @@ assert(exe&&existsSync(exe),'real installed TreasuryFlow.exe required');
 assert(reportDir,'evidence output directory required');
 mkdirSync(reportDir,{recursive:true});
 const port=9345;
-const report={mode:'REAL_INSTALLED_ELECTRON_CDP',exe:basename(exe),cdp:false,localOrigin:false,integrations:false,queryEditor:false,copyQuery:false,screenshot:false,outcome:'NOT_RUN'};
+const report={mode:'REAL_INSTALLED_ELECTRON_CDP',exe:basename(exe),cdp:false,localOrigin:false,integrations:false,queryEditor:false,copyQuery:false,copyExactlyEditedSql:false,clipboardMode:'INTERCEPTED_API_NOT_WINDOWS_CLIPBOARD',screenshot:false,outcome:'NOT_RUN'};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function wait(fn,timeout=75000){let error;const until=Date.now()+timeout;while(Date.now()<until){try{const x=await fn();if(x)return x;}catch(e){error=e;}await sleep(400);}throw error||Error('CDP_WAIT_TIMEOUT');}
 async function connect(url){
@@ -47,6 +47,29 @@ try{
  report.integrations=true;report.queryEditor=page.editor;report.copyQuery=page.copy;
  assert(report.queryEditor,'QUERY_EDITOR_MISSING_IN_NATIVE_APP');
  assert(report.copyQuery,'COPY_BUTTON_MISSING_IN_NATIVE_APP');
+ const editedSql='SELECT TOP (7) 7 AS CopyProbe';
+ const prepared=await conn.evaluate(`(() => {
+  const field=document.querySelector('textarea[name="query"]') || document.querySelector('textarea');
+  const button=[...document.querySelectorAll('button')].find(b=>b.textContent.includes('کپی کوئری'));
+  if(!field || !button) return false;
+  window.__tfCapturedQuery=null;
+  Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{window.__tfCapturedQuery=value;}}});
+  const descriptor=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value');
+  descriptor.set.call(field, ${JSON.stringify(editedSql)});
+  field.dispatchEvent(new Event('input',{bubbles:true}));
+  return true;
+ })()`);
+ assert(prepared,'QUERY_COPY_SETUP_FAILED');
+ await sleep(300);
+ const clicked=await conn.evaluate(`(() => {
+  const button=[...document.querySelectorAll('button')].find(b=>b.textContent.includes('کپی کوئری'));
+  if(!button) return false;
+  button.click();
+  return true;
+ })()`);
+ assert(clicked,'QUERY_COPY_BUTTON_NOT_CLICKABLE');
+ report.copyExactlyEditedSql=await wait(()=>conn.evaluate('window.__tfCapturedQuery === '+JSON.stringify(editedSql)),10000);
+ assert(report.copyExactlyEditedSql,'EDITED_QUERY_NOT_COPIED_EXACTLY');
  const png=await conn.command('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});
  assert(png.data,'NATIVE_SCREENSHOT_MISSING');
  writeFileSync(join(reportDir,'treasuryflow-installed-ui.png'),Buffer.from(png.data,'base64'));report.screenshot=true;
