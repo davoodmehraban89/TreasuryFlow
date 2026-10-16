@@ -52,6 +52,16 @@ jobs:
           if(!(Test-Path (Join-Path $folder 'package-lock.json'))){throw 'PACKAGE_LOCK_MISSING'}
           $bad=@(Get-ChildItem $folder -Recurse -File -Force | Where-Object {$_.Name -match '^\.env($|\.)|^license\.key$|^connectionString\.txt$|\.pfx$|\.p12$|\.pem$|\.sqlite$|\.db$'})
           if($bad.Count){throw 'SENSITIVE_OR_RUNTIME_FILES_PRESENT'}
+      - name: Fail closed if actual V5 native bridge source is missing
+        shell: pwsh
+        run: |
+          if ($env:LAB_VERSION -eq 'V5_FROM_PRIVATE_RELEASE') {
+            $source=Join-Path $env:LAB_SOURCE 'native/MayanInterop/Program.cs'
+            if (!(Test-Path $source)) {
+              'V5 Windows build: BLOCKED_MISSING_NATIVE_BRIDGE_SOURCE' >> $env:GITHUB_STEP_SUMMARY
+              throw 'V5_NATIVE_BRIDGE_SOURCE_MISSING'
+            }
+          }
       - name: Run independently testable Mayan/Treasury semantic comparison regressions
         shell: pwsh
         run: |
@@ -90,9 +100,8 @@ jobs:
             if($LASTEXITCODE -ne 0){throw 'NATIVE_BUILD_FAILED'}
             'buildable=true' >> $env:GITHUB_OUTPUT
           }elseif($env:LAB_VERSION -eq 'V5_FROM_PRIVATE_RELEASE'){
-            'buildable=false' >> $env:GITHUB_OUTPUT
-            "::warning::V5 package omits native/MayanInterop/Program.cs. Full desktop build is blocked, not passed."
-            'Full V5 desktop build: BLOCKED_MISSING_NATIVE_BRIDGE' >> $env:GITHUB_STEP_SUMMARY
+            'Full V5 desktop build: BLOCKED_MISSING_NATIVE_BRIDGE_SOURCE' >> $env:GITHUB_STEP_SUMMARY
+            throw 'V5_NATIVE_BRIDGE_SOURCE_MISSING'
           }else{
             'buildable=true' >> $env:GITHUB_OUTPUT
           }
