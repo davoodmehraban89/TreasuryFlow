@@ -67,8 +67,13 @@ try{
  };
  const submit=async (page,marker,fields)=>{
    await go(page,marker);
-   report.stage='native-field-injection:'+page;
-   await conn.evaluate('window.__vmSynthetic='+JSON.stringify(fields));
+   report.stage='native-field-entry:'+page;
+   for(const [name,value] of Object.entries(fields)){
+     await conn.evaluate('window.__tfField='+JSON.stringify({name,value}));
+     const mode=await conn.evaluate("(()=>{const {name,value}=window.__tfField;const form=document.querySelector('main form');const input=form?.elements.namedItem(name);if(!input)return 'MISSING_FIELD';if(input.type==='checkbox'){if(input.checked!==Boolean(value))input.click();return 'SPECIAL';}if(input.tagName==='SELECT'){input.value=value==='@FIRST'?[...input.options].find(o=>o.value)?.value||'':String(value);input.dispatchEvent(new Event('change',{bubbles:true}));return 'SPECIAL';}if(input.type==='date'){input.value=String(value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));return 'SPECIAL';}input.focus();if(typeof input.select==='function')input.select();return 'TEXT';})()");
+     assert.notEqual(mode,'MISSING_FIELD','NATIVE_FIELD_MISSING_'+name);
+     if(mode==='TEXT')await conn.command('Input.insertText',{text:String(value)});
+   }
    const formSnapshot=await conn.evaluate("(()=>{const form=document.querySelector('main form');return form?Object.fromEntries(new FormData(form)):null})()");
    assert(formSnapshot,'NATIVE_FORM_NOT_FOUND_'+page);
    for(const [name,value] of Object.entries(fields)){
@@ -76,7 +81,7 @@ try{
      else if(typeof value!=='boolean')assert.equal(String(formSnapshot[name]),String(value),'NATIVE_FORMDATA_MISMATCH_'+name);
    }
    report.stage='native-submit:'+page;
-   const submitted=await conn.evaluate("(()=>{const form=document.querySelector('main form');if(!form)return 'NO_FORM';for(const [k,v] of Object.entries(window.__vmSynthetic)){const el=form.elements.namedItem(k);if(!el)return 'MISSING_'+k;if(el.type==='checkbox'){el.checked=Boolean(v);}else if(el.tagName==='SELECT'){el.value=v==='@FIRST'?[...el.options].find(o=>o.value)?.value||'':String(v);}else{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,String(v));}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}if(!form.reportValidity())return 'INVALID_FORM';setTimeout(()=>form.requestSubmit(),50);return 'SUBMITTED';})()");
+   const submitted=await conn.evaluate("(()=>{const form=document.querySelector('main form');if(!form)return 'NO_FORM';if(!form.reportValidity())return 'INVALID_FORM';setTimeout(()=>form.requestSubmit(),100);return 'SUBMITTED';})()");
    if(submitted!=='SUBMITTED')return submitted;
    // Next Server Actions can close or replace the CDP target on redirect.
    // Follow the browser's actual URL, then attach to its current target.
