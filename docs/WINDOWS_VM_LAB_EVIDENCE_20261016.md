@@ -40,3 +40,11 @@ Observed result: 15 passed, 0 failed, 0 skipped. This is a local contract test, 
 4. Stage a separately authorized, secret-free Mayan QA package to execute the isolated WinForms structural probe. Real parity requires both applications producing captured outputs for the same synthetic inputs; do not equate fixture-only tests with runtime evidence.
 
 No merge to `main`, no deployment, no live bank connection, no customer data upload or money movement performed.
+
+## Additional manual-dispatch prerequisite
+
+Official GitHub Actions documentation requires a `workflow_dispatch` workflow file to exist on the repository **default branch** for manual runs (https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow). TreasuryFlow's `main` currently contains only `README.md`, while both test workflows are confined to the feature branch. **This prevents reliable direct manual dispatch of these feature-only workflows.**
+
+Safe resolution: after user approval, introduce a tightly scoped, read-only-permission manual CI entry point on `main` with exact branch/commit selection; do not merge the application's development tree or expose the private repository. Do not change the default branch or settings without approval. A branch-specific opt-in push trigger is another option but may schedule billable runner minutes and cannot substitute for authorized provisioning.
+
+The latest feature branch changes remain UNVERIFIED on Windows until both dispatcher configuration and hosted runner availability are confirmed.
