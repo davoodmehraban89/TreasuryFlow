@@ -1,0 +1,22 @@
+name: TreasuryFlow Windows VM Build & Real Runtime Lab
+
+# Default-branch discovery entrypoint only. The full lab lives on the selected feature branch.
+on:
+  workflow_dispatch:
+    inputs:
+      v5_source_tag:
+        description: 'Private GitHub release tag with TreasuryFlow-V5-CI-Source.zip'
+        type: string
+        required: false
+      v5_sha256:
+        description: 'SHA-256 of TreasuryFlow-V5-CI-Source.zip'
+        type: string
+        required: false
+permissions:
+  contents: read
+jobs:
+  never-run-from-main:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Select ci/windows-dual-app-lab-20261016 in the Run workflow branch selector.'
