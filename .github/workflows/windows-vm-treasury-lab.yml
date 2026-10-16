@@ -118,6 +118,11 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'PREPARE_STANDALONE_FAILED'}
           npm exec -- electron-builder --dir --win --x64 --publish never
           if($LASTEXITCODE -ne 0){throw 'UNPACKED_ELECTRON_BUILD_FAILED'}
+          $modules=Join-Path $env:LAB_SOURCE 'release/win-unpacked/resources/standalone/node_modules'
+          foreach($module in @('next','react','react-dom')){
+            if(!(Test-Path (Join-Path $modules "$module/package.json"))){throw ("PACKAGED_RUNTIME_MODULE_MISSING_"+$module)}
+          }
+          'Verified runtime Next, React, ReactDOM modules physically exist in packaged resources.' >> $env:GITHUB_STEP_SUMMARY
       - name: Probe real unpacked Electron EXE before the portable bootstrapper
         if: steps.native.outputs.buildable == 'true'
         shell: pwsh
