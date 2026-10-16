@@ -74,6 +74,9 @@
         "directories": {
             "output": "release"
         },
-        "artifactName": "TreasuryFlow-${version}-Windows-${arch}.${ext}"
+        "artifactName": "TreasuryFlow-${version}-Windows-${arch}.${ext}",
+        "nsis": {
+            "artifactName": "TreasuryFlow-Setup-${version}-Windows-${arch}.${ext}"
+        }
     }
 }
