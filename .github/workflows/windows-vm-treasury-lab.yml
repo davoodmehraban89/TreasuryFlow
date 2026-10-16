@@ -197,7 +197,7 @@ jobs:
                 $record=Get-Content $file -Raw | ConvertFrom-Json
                 $state=if($record.outcome -eq $item.pass){'PASS'}else{'FAILED_OR_INCOMPLETE'}
                 if($state -eq 'PASS' -and $item.check -eq 'installed_gui'){
-                  $required=@('localEntry','realCDP','localOrigin','integrations','queryEditor','copyQuery','copyExactlyEditedSql','syntheticAccount','syntheticBeneficiary','syntheticDraft','appReopened','durableData','auditPersisted')
+                  $required=@('preLaunchPortClear','localEntry','realCDP','localOrigin','integrations','queryEditor','copyQuery','copyExactlyEditedSql','syntheticAccount','syntheticBeneficiary','syntheticDraft','appReopened','durableData','auditPersisted')
                   foreach($field in $required){
                     if(-not $record.$field){$state='FINANCIAL_UI_MATRIX_INCOMPLETE';break}
                   }
