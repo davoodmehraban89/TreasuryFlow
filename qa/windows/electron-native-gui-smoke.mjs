@@ -9,7 +9,7 @@ assert(exe&&existsSync(exe),'real installed TreasuryFlow.exe required');
 assert(reportDir,'evidence output directory required');
 mkdirSync(reportDir,{recursive:true});
 const port=9345;
-const report={mode:'REAL_INSTALLED_ELECTRON_CDP',exe:basename(exe),cdp:false,localOrigin:false,integrations:false,queryEditor:false,copyQuery:false,copyExactlyEditedSql:false,clipboardMode:'INTERCEPTED_API_NOT_WINDOWS_CLIPBOARD',screenshot:false,localEntry:false,visitedRoutes:[],syntheticAccount:false,syntheticBeneficiary:false,syntheticDraft:false,appReopened:false,durableData:false,auditPersisted:false,upgrade:'NOT_RUN_NO_BASELINE',outcome:'NOT_RUN'};
+const report={mode:'REAL_INSTALLED_ELECTRON_CDP',exe:basename(exe),cdp:false,localOrigin:false,integrations:false,queryEditor:false,copyQuery:false,copyExactlyEditedSql:false,clipboardMode:'INTERCEPTED_API_NOT_WINDOWS_CLIPBOARD',screenshot:false,stage:'connect',cdpReconnections:0,localEntry:false,visitedRoutes:[],syntheticAccount:false,syntheticBeneficiary:false,syntheticDraft:false,appReopened:false,durableData:false,auditPersisted:false,upgrade:'NOT_RUN_NO_BASELINE',outcome:'NOT_RUN'};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function wait(fn,timeout=75000){let error;const until=Date.now()+timeout;while(Date.now()<until){try{const x=await fn();if(x)return x;}catch(e){error=e;}await sleep(400);}throw error||Error('CDP_WAIT_TIMEOUT');}
 async function connect(url){
@@ -40,10 +40,24 @@ try{
 
  const origin='http://127.0.0.1:3210';
  const go=async(path,heading)=>{
-   await conn.command('Page.navigate',{url:origin+path});
+   // A full Next.js navigation may replace the renderer's CDP target and
+   // invalidate pending Page.navigate replies. Reattach by URL after navigation.
+   report.stage='native-route:'+path;
+   const dest=origin+path;
+   const pending=conn.command('Page.navigate',{url:dest}).catch(()=>null);
+   await Promise.race([pending,sleep(850)]);
+   const socket=await wait(async()=>{
+     const response=await fetch('http://127.0.0.1:'+port+'/json/list',{signal:AbortSignal.timeout(1500)});
+     if(!response.ok)return null;
+     const pages=await response.json();
+     return pages.find(p=>p.type==='page'&&p.url?.startsWith(dest)&&p.webSocketDebuggerUrl)?.webSocketDebuggerUrl;
+   },35000);
+   try{conn.ws.close()}catch{}
+   conn=await connect(socket);
+   report.cdpReconnections++;
    return wait(async()=>{
-     const x=await conn.evaluate("({path:location.pathname,text:document.body?.innerText||''})");
-     return x?.path===path&&x.text.includes(heading)&&!x.text.includes('خطا در بارگذاری صفحه')?x:null;
+     const x=await conn.evaluate("({path:location.pathname,text:document.body?.innerText||'',errorToast:!!document.querySelector('.toast-error')})");
+     return x?.path===path&&x.text.includes(heading)&&!x.errorToast&&!x.text.includes('خطا در بارگذاری صفحه')?x:null;
    },30000);
  };
  const iban=(digit)=>{
@@ -71,7 +85,7 @@ try{
  report.localOrigin=new URL(home.href).origin==='http://127.0.0.1:3210';
  assert(report.localOrigin,'NATIVE_APP_ORIGIN_NOT_LOCAL');
  assert.match(home.title,/TreasuryFlow/i);
- await conn.command('Page.navigate',{url:'http://127.0.0.1:3210/integrations'});
+ await go('/integrations','اتصال به دیتابیس');
  const page=await wait(async()=>{const x=await conn.evaluate(
  "({href:location.href,title:document.title,editor:!!document.querySelector('textarea'),copy:[...document.querySelectorAll('button')].some(b=>b.textContent.includes('کپی کوئری'))})");
  return isIntegrationsEditorReady(x)?x:null;});
