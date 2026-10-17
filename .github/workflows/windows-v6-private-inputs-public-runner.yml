@@ -1,5 +1,8 @@
 name: V6 private inputs on free public Windows runner (NOT V7)
 on:
+  push:
+    branches: ['ci/public-windows-bridge-probe-20261017']
+    paths: ['.github/workflows/windows-v6-private-inputs-public-runner.yml']
   workflow_dispatch:
 
 permissions:
