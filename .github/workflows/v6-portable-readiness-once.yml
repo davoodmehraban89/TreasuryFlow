@@ -55,11 +55,45 @@ jobs:
           $ErrorActionPreference='Stop'
           Set-Location -LiteralPath $env:TF_PRIVATE_STAGE
           $log=Join-Path $env:RUNNER_TEMP 'private-v6-portable-run.log'
-          & ./qa/windows/portable-v6-smoke.ps1 -Executable $env:TF_PRIVATE_EXE -ExpectedSha256 '99976331f606d8c8ffcf8e9f4895848ff736870790e14b4c7f08a0abdbb7a50a' -EvidenceDir $env:RUNNER_TEMP *> $log
-          if($LASTEXITCODE -ne 0){throw 'PORTABLE_V6_READINESS_FAILED'}
+          $PSNativeCommandUseErrorActionPreference=$false
+          $scriptThrew=$false
+          try {
+            & ./qa/windows/portable-v6-smoke.ps1 -Executable $env:TF_PRIVATE_EXE -ExpectedSha256 '99976331f606d8c8ffcf8e9f4895848ff736870790e14b4c7f08a0abdbb7a50a' -EvidenceDir $env:RUNNER_TEMP *> $log
+          } catch { $scriptThrew=$true }
+          $exitCode=$LASTEXITCODE
+          Write-Host "PORTABLE_SCRIPT_THROWN=$scriptThrew"
+          Write-Host "PORTABLE_SCRIPT_NATIVE_EXIT_NONZERO=$($exitCode -ne 0)"
+          $logContent=if(Test-Path -LiteralPath $log){Get-Content -LiteralPath $log -Raw}else{''}
+          $markers=[ordered]@{
+            START_TIMEOUT='timeout|timed.out|timed out'
+            PROCESS_EXIT='exited|exit.code|exitcode'
+            MISSING_RESOURCE='not.found|missing|ENOENT'
+            ACCESS_DENIED='EACCES|EPERM|Access.Denied'
+            PORT_IN_USE='EADDRINUSE|already.in.use'
+            WIN_PROCESS_ERROR='Start-Process|process.failed|unable.to.start'
+            HEALTH_ERROR='health|ready|readiness'
+            ELECTRON_ERROR='electron'
+            BANK_DISABLED='bankDisabled|BANK_ADAPTER_MODE'
+            HASH_MISMATCH='hash.mismatch|SHA256.*fail'
+            JSON_ERROR='ConvertFrom-Json|json.parse'
+            PS_ERROR='Exception|ParserError|CommandNotFoundException'
+          }
+          foreach($key in $markers.Keys){Write-Host ("SMOKE_LOG_HAS_"+$key+"="+[bool]($logContent -match $markers[$key]))}
           $evidence=Join-Path $env:RUNNER_TEMP 'v6-portable-runtime.json'
-          if(!(Test-Path -LiteralPath $evidence)){throw 'PORTABLE_EVIDENCE_MISSING'}
-          $r=Get-Content -LiteralPath $evidence -Raw | ConvertFrom-Json
+          $hasEvidence=Test-Path -LiteralPath $evidence
+          Write-Host "PORTABLE_EVIDENCE_JSON_PRESENT=$hasEvidence"
+          if($hasEvidence){
+            try{
+              $r=Get-Content -LiteralPath $evidence -Raw | ConvertFrom-Json
+              $allowed=@('PASS_READY_ONLY','FAIL','FAILED','ERROR','TIMEOUT','NOT_READY')
+              $safeStatus=if($allowed -contains [string]$r.status){[string]$r.status}else{'OTHER'}
+              Write-Host "PORTABLE_EVIDENCE_STATUS=$safeStatus"
+              Write-Host "PORTABLE_EVIDENCE_READY=$([bool]$r.ready)"
+              Write-Host "PORTABLE_EVIDENCE_BANK_DISABLED=$([bool]$r.bankDisabled)"
+            }catch{throw 'PORTABLE_EVIDENCE_JSON_UNREADABLE'}
+          }
+          if($scriptThrew -or $exitCode -ne 0){throw 'PORTABLE_V6_READINESS_FAILED'}
+          if(!$hasEvidence){throw 'PORTABLE_EVIDENCE_MISSING'}
           if($r.status -ne 'PASS_READY_ONLY' -or !$r.ready -or !$r.bankDisabled){throw 'PORTABLE_READINESS_CONTRACT_FAILED'}
           Write-Host 'GATE_PASS_ORIGINAL_V6_PORTABLE_LOCAL_READY_BANK_DISABLED'
       - name: Publish only scope and privacy controls
