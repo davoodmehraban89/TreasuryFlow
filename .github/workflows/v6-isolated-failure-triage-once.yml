@@ -1,4 +1,4 @@
-name: V6 isolated test assertion triage (NOT V7)
+name: V6 private SQL unit assertion fix candidate evaluation (NOT V7)
 on:
   push:
     branches: ['ci/public-windows-bridge-probe-20261017']
@@ -35,6 +35,11 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'DOWNLOAD_FAILED'}
           if((Get-FileHash $zip -Algorithm SHA256).Hash -ine '9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f'){throw 'ZIP_HASH_MISMATCH'}
           Expand-Archive -LiteralPath $zip -DestinationPath $root -Force
+          $privatePatch=gh api 'repos/davoodmehraban89/TreasuryFlow-Validation-Private/contents/qa/patches/v6-sql-assertion-fix.mjs?ref=2265e7e370d254eaa09988164559b2cd0c10c0d7' 2>$null | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0 -or !$privatePatch.content){throw 'PRIVATE_PATCH_DOWNLOAD_FAILED'}
+          $patchFile=Join-Path $env:RUNNER_TEMP 'private-v6-unit-patch.mjs'
+          [IO.File]::WriteAllBytes($patchFile,[Convert]::FromBase64String(($privatePatch.content -replace '\\s','')))
+          "TF_PATCH_FILE=$patchFile" >> $env:GITHUB_ENV
           if(!(Test-Path -LiteralPath (Join-Path $root 'package.json'))){throw 'INVALID_ROOT'}
           "TF_STAGE=$root" >> $env:GITHUB_ENV
           Write-Host 'PRIVATE_ZIP_SHA256_PASS'
@@ -47,6 +52,8 @@ jobs:
           $ErrorActionPreference='Continue'
           $PSNativeCommandUseErrorActionPreference=$false
           Set-Location -LiteralPath $env:TF_STAGE
+          node $env:TF_PATCH_FILE $env:TF_STAGE
+          if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_UNIT_PATCH_NOT_APPLICABLE' }
           $install=Join-Path $env:RUNNER_TEMP 'private-npm-install.log'
           npm ci --no-audit --no-fund *> $install
           if($LASTEXITCODE -ne 0){throw 'PRIVATE_NPM_INSTALL_FAILED'}
@@ -116,6 +123,30 @@ jobs:
           node (Join-Path $env:RUNNER_TEMP 'classify-private.mjs') $report
           if($testExit -ne 0){throw 'V6_TESTS_STILL_FAILING_PRIVATE_OUTPUT_SUPPRESSED'}
           Write-Host 'V6_TESTS_PASS'
+      - name: Evaluate independently lint and Next build after green unit tests
+        run: |
+          $ErrorActionPreference='Continue'
+          $PSNativeCommandUseErrorActionPreference=$false
+          Set-Location -LiteralPath $env:TF_STAGE
+          npm run lint *> (Join-Path $env:RUNNER_TEMP 'private-lint.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_STAGE_LINT_FAILED'}
+          Write-Host 'GATE_PASS_LINT'
+          npm run build *> (Join-Path $env:RUNNER_TEMP 'private-next-build.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_STAGE_BUILD_FAILED'}
+          Write-Host 'GATE_PASS_NEXT_BUILD'
+      - name: Compile and verify native bridge without external SQL or bank
+        run: |
+          $ErrorActionPreference='Continue'
+          $PSNativeCommandUseErrorActionPreference=$false
+          Set-Location -LiteralPath $env:TF_STAGE
+          & ./scripts/build-mayan-native.ps1 *> (Join-Path $env:RUNNER_TEMP 'private-native-build.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_NATIVE_BUILD_FAILED'}
+          $exe=Join-Path $env:TF_STAGE 'native/MayanInterop/TreasuryFlow.MayanInterop.exe'
+          if(!(Test-Path -LiteralPath $exe)){throw 'PRIVATE_NATIVE_OUTPUT_MISSING'}
+          $h=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          $v=(& $exe verify-assembly $exe $h | ConvertFrom-Json)
+          if($LASTEXITCODE -ne 0 -or !$v.ok -or $v.loadedForExecution -ne $false){throw 'PRIVATE_NATIVE_SELF_CHECK_FAILED'}
+          Write-Host 'GATE_PASS_NATIVE_COMPILE_AND_VERIFICATION'
       - name: Always disclose isolated scope only
         if: always()
         run: |
