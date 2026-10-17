@@ -1,0 +1,137 @@
+name: V6 private inputs on free public Windows runner (NOT V7)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: treasuryflow-public-windows-v6-validation
+  cancel-in-progress: false
+
+jobs:
+  validate-v6:
+    name: Windows 2022 — private V6 inputs, sanitized evidence only
+    runs-on: windows-2022
+    timeout-minutes: 75
+    env:
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ: '0'
+      TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ: '0'
+      TREASURYFLOW_ENABLE_SQL_LAB: '0'
+      TREASURYFLOW_DESKTOP_LOCAL: '1'
+      TF_PRIVATE_TAG: validation-inputs-20261017
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Verify private release inputs with scoped read-only token
+        env:
+          GH_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) { throw 'PRIVATE_READ_TOKEN_NOT_CONFIGURED' }
+          $inputDir=Join-Path $env:RUNNER_TEMP 'tf-private-inputs'
+          $sourceDir=Join-Path $env:RUNNER_TEMP 'tf-v6-stage'
+          $exeDir=Join-Path $env:RUNNER_TEMP 'tf-v6-portable'
+          New-Item -ItemType Directory -Force -Path $inputDir,$sourceDir,$exeDir | Out-Null
+          gh release download $env:TF_PRIVATE_TAG --repo 'davoodmehraban89/TreasuryFlow-Validation-Private' --pattern 'TreasuryFlow_Validation_Staging_20261017.zip' --pattern 'release-native-v6-final.rar' --dir $inputDir 1>$null 2>$null
+          if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_RELEASE_DOWNLOAD_FAILED' }
+          $inputs=@(
+            @{name='TreasuryFlow_Validation_Staging_20261017.zip';sha='9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f'},
+            @{name='release-native-v6-final.rar';sha='b8629defc172cef972ad12bb3a2e45a55abed3a5e3a5d991ab2567b877e0c915'}
+          )
+          foreach($f in $inputs) {
+            $file=Join-Path $inputDir $f.name
+            if (!(Test-Path -LiteralPath $file)) { throw 'PRIVATE_INPUT_MISSING' }
+            $sha=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+            if ($sha -ine $f.sha) { throw 'PRIVATE_INPUT_SHA256_FAILED' }
+          }
+          Expand-Archive -LiteralPath (Join-Path $inputDir 'TreasuryFlow_Validation_Staging_20261017.zip') -DestinationPath $sourceDir -Force
+          if(!(Test-Path -LiteralPath (Join-Path $sourceDir 'native/MayanInterop/Program.cs'))) { throw 'RECOVERED_NATIVE_SOURCE_MISSING' }
+          $seven=(Get-Command 7z.exe -ErrorAction Stop).Source
+          & $seven x -y "-o$exeDir" (Join-Path $inputDir 'release-native-v6-final.rar') *> (Join-Path $env:RUNNER_TEMP 'private-extract.log')
+          if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_RAR_EXTRACT_FAILED' }
+          $exe=Get-ChildItem -LiteralPath $exeDir -Filter 'TreasuryFlow-1.0.1-Windows-x64.exe' -File -Recurse | Select-Object -First 1
+          if(!$exe){throw 'V6_EXE_MISSING'}
+          if((Get-FileHash -LiteralPath $exe.FullName -Algorithm SHA256).Hash -ine '99976331f606d8c8ffcf8e9f4895848ff736870790e14b4c7f08a0abdbb7a50a'){throw 'V6_EXE_SHA256_FAILED'}
+          "TF_PRIVATE_SOURCE_DIR=$sourceDir" >> $env:GITHUB_ENV
+          "TF_PRIVATE_V6_EXE=$($exe.FullName)" >> $env:GITHUB_ENV
+          "TF_PRIVATE_ASSET_SHA_PASS=true" >> $env:GITHUB_ENV
+          Write-Host 'PRIVATE_INPUT_TRANSFER_AND_HASH_PASS (source and binaries will never be uploaded as public artifacts)'
+
+      - name: Install Node 22 after private download token is removed
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run source test and build gates without printing proprietary output
+        run: |
+          $ErrorActionPreference='Stop'
+          if ($env:TF_PRIVATE_ASSET_SHA_PASS -ne 'true') { throw 'PRIVATE_INPUTS_NOT_VERIFIED' }
+          Set-Location -LiteralPath $env:TF_PRIVATE_SOURCE_DIR
+          function Gate([string]$name,[scriptblock]$action){
+            $log=Join-Path $env:RUNNER_TEMP ("private-gate-"+$name+".log")
+            $global:LASTEXITCODE=0
+            try {
+              & $action *> $log
+              if($LASTEXITCODE -ne 0){throw 'NONZERO_EXIT'}
+              Write-Host "GATE_PASS: $name"
+            } catch {
+              throw "GATE_FAIL: $name (full private log intentionally withheld from PUBLIC repository)"
+            }
+          }
+          Gate 'npm-ci' { npm ci --no-audit --no-fund }
+          Gate 'readonly-sql-guard' { node --test src/platform/integration/readonly-sql-policy.node.mjs }
+          Gate 'copyable-sql-widget' { node scripts/check-sql-copy-ui.mjs }
+          Gate 'typecheck' { npm run typecheck }
+          Gate 'unit-tests' { npm test -- --reporter=dot }
+          Gate 'lint' { npm run lint }
+          Gate 'next-build' { npm run build }
+          Gate 'standalone-bundle' { node scripts/prepare-standalone.mjs }
+          $env:NODE_PATH=Join-Path $env:TF_PRIVATE_SOURCE_DIR '.next/standalone/vendor_modules'
+          Gate 'standalone-smoke' { npm run smoke }
+          "TF_SOURCE_GATES_PASS=true" >> $env:GITHUB_ENV
+
+      - name: Compile and self-check recovered C-sharp bridge
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:TF_SOURCE_GATES_PASS -ne 'true'){throw 'SOURCE_GATES_NOT_PASSED'}
+          Set-Location -LiteralPath $env:TF_PRIVATE_SOURCE_DIR
+          & ./scripts/build-mayan-native.ps1 *> (Join-Path $env:RUNNER_TEMP 'private-native-compile.log')
+          if ($LASTEXITCODE -ne 0){throw 'NATIVE_BUILD_FAILED'}
+          $exe=Join-Path $env:TF_PRIVATE_SOURCE_DIR 'native/MayanInterop/TreasuryFlow.MayanInterop.exe'
+          if(!(Test-Path -LiteralPath $exe)){throw 'NATIVE_OUTPUT_MISSING'}
+          $hash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          $result=(& $exe 'verify-assembly' $exe $hash | ConvertFrom-Json)
+          if($LASTEXITCODE -ne 0 -or !$result.ok -or $result.loadedForExecution -ne $false){throw 'NATIVE_SELF_CHECK_FAILED'}
+          Write-Host 'GATE_PASS: native-compile-and-self-check'
+          "TF_NATIVE_PASS=true" >> $env:GITHUB_ENV
+
+      - name: Run SHA256 pinned original V6 portable on Windows
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:TF_NATIVE_PASS -ne 'true'){throw 'NATIVE_NOT_VALIDATED'}
+          Set-Location -LiteralPath $env:TF_PRIVATE_SOURCE_DIR
+          & ./qa/windows/portable-v6-smoke.ps1 -Executable $env:TF_PRIVATE_V6_EXE -ExpectedSha256 '99976331f606d8c8ffcf8e9f4895848ff736870790e14b4c7f08a0abdbb7a50a' -EvidenceDir $env:RUNNER_TEMP *> (Join-Path $env:RUNNER_TEMP 'private-v6-runtime.log')
+          if($LASTEXITCODE -ne 0){throw 'V6_PORTABLE_READINESS_FAILED'}
+          $result=Get-Content -Raw -LiteralPath (Join-Path $env:RUNNER_TEMP 'v6-portable-runtime.json') | ConvertFrom-Json
+          if($result.status -ne 'PASS_READY_ONLY' -or !$result.ready -or !$result.bankDisabled){throw 'V6_READINESS_CONTRACT_FAILED'}
+          "TF_V6_PORTABLE_PASS=true" >> $env:GITHUB_ENV
+          Write-Host 'GATE_PASS: V6 portable process and local readiness (NOT full GUI/SQL Server)'
+
+      - name: Publish only non-sensitive pass/fail gate summary
+        if: always()
+        run: |
+          $report=[ordered]@{
+            stage='PRELIMINARY_V6_PUBLIC_RUNNER'
+            privateInputsHashValidated=($env:TF_PRIVATE_ASSET_SHA_PASS -eq 'true')
+            sourceGatePassed=($env:TF_SOURCE_GATES_PASS -eq 'true')
+            nativeGatePassed=($env:TF_NATIVE_PASS -eq 'true')
+            portableReadinessPassed=($env:TF_V6_PORTABLE_PASS -eq 'true')
+            sqlServerAcceptance='NOT_TESTED'
+            v7Acceptance='NOT_TESTED'
+            privateSourcePublished=$false
+            productionBankConnections='DISABLED'
+          }
+          $report | ConvertTo-Json -Compress | Write-Host
