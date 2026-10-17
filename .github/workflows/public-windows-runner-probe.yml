@@ -1,10 +1,5 @@
 name: Public Windows runner — no private payload
 on:
-  push:
-    branches:
-      - ci/public-windows-bridge-probe-20261017
-    paths:
-      - .github/workflows/public-windows-runner-probe.yml
   workflow_dispatch:
 
 permissions:
