@@ -1,0 +1,37 @@
+name: Public Windows runner — no private payload
+on:
+  push:
+    branches:
+      - ci/public-windows-bridge-probe-20261017
+    paths:
+      - .github/workflows/public-windows-runner-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Confirm free Windows runner and available lab tools
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Inspect isolated runner capabilities without confidential assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'NOT_WINDOWS' }
+          [pscustomobject]@{
+            windowsVersion = (Get-CimInstance Win32_OperatingSystem).Caption
+            runnerOS = $env:RUNNER_OS
+            pwshVersion = $PSVersionTable.PSVersion.ToString()
+            node = (Get-Command node -ErrorAction SilentlyContinue).Source
+            npm = (Get-Command npm -ErrorAction SilentlyContinue).Source
+            dotnet = (Get-Command dotnet -ErrorAction SilentlyContinue).Source
+            sevenZip = (Get-Command 7z -ErrorAction SilentlyContinue).Source
+            sqlcmd = (Get-Command sqlcmd -ErrorAction SilentlyContinue).Source
+            sqlServiceInstalled = @((Get-Service -Name 'MSSQL*' -ErrorAction SilentlyContinue)).Count -gt 0
+            privateV6TestExecuted = $false
+            sourcePublished = $false
+          } | ConvertTo-Json -Depth 3
+          Write-Host "PUBLIC_WINDOWS_VM_PROBE_PASS"
