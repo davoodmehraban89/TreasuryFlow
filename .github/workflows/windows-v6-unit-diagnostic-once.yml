@@ -1,0 +1,106 @@
+name: V6 one-shot private unit-test diagnostic (NOT V7)
+on:
+  push:
+    branches: ['ci/public-windows-bridge-probe-20261017']
+    paths: ['.github/workflows/windows-v6-unit-diagnostic-once.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: treasuryflow-v6-private-test-diagnostic-once
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    name: Windows 2022 - sanitized V6 unit diagnostics only
+    runs-on: windows-2022
+    timeout-minutes: 35
+    env:
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ: '0'
+      TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ: '0'
+      TREASURYFLOW_ENABLE_SQL_LAB: '0'
+      TREASURYFLOW_DESKTOP_LOCAL: '1'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Download and SHA256 verify private staging ZIP without printing its contents
+        env:
+          GH_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) { throw 'PRIVATE_TOKEN_MISSING' }
+          $download=Join-Path $env:RUNNER_TEMP 'tf-source-private.zip'
+          $stage=Join-Path $env:RUNNER_TEMP 'tf-stage-private'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          gh release download 'validation-inputs-20261017' --repo 'davoodmehraban89/TreasuryFlow-Validation-Private' --pattern 'TreasuryFlow_Validation_Staging_20261017.zip' --dir $env:RUNNER_TEMP 1>$null 2>$null
+          if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_DOWNLOAD_FAILED' }
+          $source=Join-Path $env:RUNNER_TEMP 'TreasuryFlow_Validation_Staging_20261017.zip'
+          if (!(Test-Path -LiteralPath $source)) { throw 'PRIVATE_ZIP_MISSING' }
+          if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ine '9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f') { throw 'PRIVATE_ZIP_HASH_MISMATCH' }
+          Expand-Archive -LiteralPath $source -DestinationPath $stage -Force
+          if (!(Test-Path -LiteralPath (Join-Path $stage 'package.json'))) { throw 'PRIVATE_STAGE_PACKAGE_MISSING' }
+          "TF_STAGE_DIR=$stage" >> $env:GITHUB_ENV
+          Write-Host 'PRIVATE_INPUT_HASH_PASS'
+
+      - name: Prepare isolated Node 22 after private token is removed
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies without exposing proprietary command output
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-Location -LiteralPath $env:TF_STAGE_DIR
+          $log=Join-Path $env:RUNNER_TEMP 'private-install-output.txt'
+          npm ci --no-audit --no-fund *> $log
+          if ($LASTEXITCODE -ne 0) { throw 'GATE_FAIL_NPM_CI_PRIVATE_LOG_REDACTED' }
+          Write-Host 'GATE_PASS_NPM_CI'
+
+      - name: Run tests and publish only scrubbed failure names and counts
+        run: |
+          $ErrorActionPreference='Continue'
+          $PSNativeCommandUseErrorActionPreference=$false
+          Set-Location -LiteralPath $env:TF_STAGE_DIR
+          $report=Join-Path $env:RUNNER_TEMP 'private-vitest-results.json'
+          $log=Join-Path $env:RUNNER_TEMP 'private-test-console.txt'
+          npm test -- --reporter=json "--outputFile=$report" *> $log
+          $exitCode=$LASTEXITCODE
+          if (!(Test-Path -LiteralPath $report)) {
+            Write-Host 'TEST_REPORT_ABSENT - test process failed before producing a JSON result'
+            if ($exitCode -eq 0) { throw 'TEST_REPORT_MISSING' }
+            throw 'UNIT_TEST_FAILURE_DETAILS_WITHHELD'
+          }
+          try { $r=Get-Content -LiteralPath $report -Raw | ConvertFrom-Json -Depth 80 } catch { throw 'TEST_REPORT_PARSE_ERROR_PRIVATE_OUTPUT_WITHHELD' }
+          $total=[int]$r.numTotalTests
+          $passed=[int]$r.numPassedTests
+          $failed=[int]$r.numFailedTests
+          Write-Host "UNIT_TEST_COUNTS total=$total passed=$passed failed=$failed"
+          $index=0
+          foreach ($suite in @($r.testResults)) {
+            foreach ($case in @($suite.assertionResults)) {
+              if ($case.status -ne 'failed') { continue }
+              $index++
+              $name=[string]$case.title
+              $name=$name.Trim()
+              if ($name.Length -gt 90 -or $name -notmatch '^[A-Za-z0-9 _().,:;!?-]+$' -or $name -match '(?i)(secret|credential|password|token|api.?key|[0-9]{7,})') { $name='[REDACTED_TITLE]' }
+              $category='OTHER_ERROR'
+              $details=(@($case.failureMessages) -join ' ')
+              if ($details -match '(AssertionError|TypeError|ReferenceError|SyntaxError|TimeoutError|RangeError|AggregateError|DatabaseError)') { $category=$Matches[1] }
+              Write-Host "FAIL_$index title=$name category=$category"
+              if ($index -ge 20) { break }
+            }
+            if ($index -ge 20) { break }
+          }
+          if ($failed -eq 0 -and $exitCode -ne 0) { Write-Host 'NON_TEST_PROCESS_FAILURE_OR_SUITE_SETUP_FAILURE' }
+          if ($exitCode -ne 0 -or $failed -gt 0) { throw 'V6_UNIT_TESTS_FAILED_NO_PRIVATE_LOG_PUBLISHED' }
+          Write-Host 'V6_UNIT_TESTS_PASS'
+
+      - name: Confirm this diagnostic did not test or publish V7
+        if: always()
+        run: |
+          Write-Host 'SCOPE=V6_UNIT_DIAGNOSTIC_ONLY'
+          Write-Host 'SQL_SERVER=NOT_TESTED; NATIVE_BRIDGE=NOT_TESTED; V6_GUI=NOT_TESTED; V7=NOT_TESTED'
+          Write-Host 'PRIVATE_SOURCE_AND_TEST_LOGS=NOT_UPLOADED'
