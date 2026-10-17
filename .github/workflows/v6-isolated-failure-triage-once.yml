@@ -95,6 +95,16 @@ jobs:
                   console.log('TARGET_SPEC_PRESENT=true');
                   console.log('TARGET_SPEC_EXPECT_COUNT='+(chunk.match(/\bexpect\s*\(/g)||[]).length);
                   console.log('TARGET_SPEC_TERMS='+detect(chunk).join(','));
+                  const lines=src.split(/\\r?\\n/);
+                  const focus=lines[12]||'';
+                  const op=focus.includes('.not.toContain(')?'NOT_CONTAIN':focus.includes('.toContain(')?'CONTAIN':focus.includes('.toMatch(')?'MATCH':focus.includes('.toBe(')?'TO_BE':focus.includes('.toEqual(')?'TO_EQUAL':'OTHER';
+                  console.log('ASSERT_LINE_13_OPERATOR='+op);
+                  console.log('ASSERT_LINE_13_SAFE_TERMS='+detect(focus).join(','));
+                  const desired=focus.match(/\\.toContain\\([\x27\x22\x60]([^\x27\x22\x60]+)[\x27\x22\x60]\\)/)?.[1]||'';
+                  console.log('ASSERT_EXPECTED_LENGTH='+desired.length);
+                  const tags=['SELECT','TOP','SQL','READ','ReadOnly','readonly','code','placeholder','textarea','button','pre','query','select','edit','copy','aria','disabled','readOnly','نام','کوئری','انتخاب','کپی','واقعی'];
+                  console.log('ASSERT_EXPECTED_SAFE_TERMS='+tags.filter(x=>desired.toLowerCase().includes(x.toLowerCase())).join(','));
+                  console.log('ASSERT_EXPECTED_ASCII_ONLY='+/^[\\x00-\\x7F]*$/.test(desired));
                   console.log('TARGET_SPEC_HAS_RENDER_STATIC='+/renderToStaticMarkup/.test(chunk));
                   console.log('TARGET_SPEC_HAS_SOURCE_READ='+/readFileSync|readFile|fetch\(/.test(chunk));
                 }
