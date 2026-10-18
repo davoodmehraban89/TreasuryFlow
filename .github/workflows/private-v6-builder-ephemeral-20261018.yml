@@ -103,6 +103,37 @@ jobs:
               }
             }
             $record=Get-Content $privateLog -Raw
+            $attempts=[regex]::Matches($record,'PRIVATE_QA_PHASE=NSIS_DIRECT_(?:BINARY_RETRY|RETRY_SUCCEEDED|RETRY_FAILED)')
+            Write-Host ('PRIVATE_QA_DIRECT_RETRY_MARKERS='+($attempts.Count))
+            foreach($a in $attempts){Write-Host ('PRIVATE_QA_ATTEMPT='+$a.Value)}
+            if(Test-Path -LiteralPath $nsisLog){
+              # Preapproved generic English vocabulary only. No raw log,
+              # private paths, URLs, source lines, values, IDs or credentials.
+              $allowed=@('error','failed','failure','fatal','exit','code','status','process','terminated',
+                'command','cannot','could','not','find','found','missing','invalid','unrecognized',
+                'unexpected','argument','unknown','required','option','file','directory','path',
+                'package','module','dependency','native','rebuild','electron','builder','nsis',
+                'sign','signing','certificate','installer','installation','configuration',
+                'config','schema','archive','asar','version','runtime','windows','win','setup',
+                'permission','access','denied','exception','execution','message','warning',
+                'artifact','output','input','executable','target','release','publish',
+                'upload','download','network','timeout','certificate','digest','hash',
+                'checksum','integrity','symlink','extract','copy','rename','remove',
+                'read','write','create','open','close','unsupported','environment',
+                'value','type','object','null','undefined','function','property','properties',
+                'string','number','boolean','parse','syntax','operation','system','is',
+                'was','with','at','to','in','from','for','and','or','of','on','the','a','an',
+                'after','before','during','while','as','due','because','by','already',
+                'exists','cannot','isnt','doesnt','trying','use','using','please',
+                'cannot','build','building','built','pack','packaging','unpack',
+                'not','proper','invalid','has','have','had','failed','called')
+              $failureLines=@($nsisText -split '\\r?\\n' | Where-Object {$_ -match '(?i)error|failed|exception|⨯'})
+              $terminalLine=if($failureLines.Count -gt 0){[string]$failureLines[$failureLines.Count-1]}else{''}
+              $words=@([regex]::Matches($terminalLine,'[A-Za-z]{2,24}') |
+                ForEach-Object {$_.Value.ToLowerInvariant()} |
+                Where-Object {$allowed -contains $_} | Select-Object -First 30)
+              Write-Host ('PRIVATE_QA_SAFE_ERROR_WORDS='+($words -join '_'))
+            }
             $phases=[regex]::Matches($record,'PRIVATE_QA_PHASE=[A-Z_]+')
             $lastPhase=if($phases.Count -gt 0){$phases[$phases.Count-1].Value}else{'PRIVATE_QA_PHASE=BEFORE_ARCHIVE_PREFLIGHT'}
             Write-Host ('DIAGNOSTIC_LAST_VERIFIED_PHASE='+$lastPhase)
