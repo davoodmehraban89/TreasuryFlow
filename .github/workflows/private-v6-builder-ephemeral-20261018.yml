@@ -142,8 +142,7 @@ jobs:
              !$guiRecord.copyButton -or !$guiRecord.writable -or !$guiRecord.select){throw 'V6_SAME_ARTIFACT_GUI_REPORT_FAIL'}
           Write-Host 'GATE_PASS_SAME_ARTIFACT_INSTALLED_WINDOWS_OS_CLIPBOARD'
           $uninstall=@(Get-ChildItem -LiteralPath $installDir -Recurse -File -ErrorAction SilentlyContinue |
-            Where-Object {$_.Name -match '^uninstall.*\\.exe
-})
+            Where-Object {$_.Name -match '^uninstall.*[.]exe$'})
           if($uninstall.Count -ne 1){throw 'V6_NSIS_UNINSTALLER_NOT_FOUND'}
           $uninstallProcess=Start-Process -FilePath $uninstall[0].FullName -ArgumentList '/S' -PassThru
           if(!$uninstallProcess.WaitForExit(90000)){try{$uninstallProcess.Kill()}catch{};throw 'V6_UNINSTALL_TIMEOUT'}
