@@ -43,10 +43,18 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'PRIVATE_RELEASE_DOWNLOAD_FAILED'}
           $destination=Join-Path $work 'run-once-candidate'
           $privateLog=Join-Path $work 'full-builder-log-private.txt'
+          $errors=$null
+          $tokens=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Join-Path $work $paths[0]),[ref]$tokens,[ref]$errors)
+          if($errors.Count -gt 0){throw 'PRIVATE_BUILDER_POWERSHELL_PARSE_FAILED'}
           & pwsh -NoProfile -File (Join-Path $work $paths[0]) -SourceArchive $archive -OutputRoot $destination *> $privateLog
           if($LASTEXITCODE -ne 0) {
             $known='ORIGINAL_PRIVATE_SOURCE_HASH_MISMATCH|UNSAFE_ZIP_ENTRY_PATH|ARCHIVE_ENTRY_COUNT_LIMIT|ZIP_UNCOMPRESSED_SIZE_LIMIT|ZIP_SYMLINK_DISALLOWED|DUPLICATE_ZIP_ENTRY|EXTRACTED_REPARSE_POINT_DISALLOWED|OFFICIAL_XLSX_PACKAGE_LOCK_INTEGRITY_NOT_PINNED_TO_VERIFIED_ARCHIVE|SHEETJS_OFFICIAL_VENDOR_SHA256_MISMATCH|KNOWN_PRODUCTION_DEPENDENCY_ADVISORIES_REMAIN|V6_UNIT_REGRESSION_FAILED|V6_GATE_FAILED_[A-Z]+|V6_NSIS_BUILDER_FAILED|READ_ONLY_SQL_ADAPTER_PATCH_FAILED|SQL_EDITOR_TEST_PATCH_FAILED'
-            $match=[regex]::Match((Get-Content $privateLog -Raw),$known)
+            $record=Get-Content $privateLog -Raw
+            $phases=[regex]::Matches($record,'PRIVATE_QA_PHASE=[A-Z_]+')
+            $lastPhase=if($phases.Count -gt 0){$phases[$phases.Count-1].Value}else{'PRIVATE_QA_PHASE=BEFORE_ARCHIVE_PREFLIGHT'}
+            Write-Host ('DIAGNOSTIC_LAST_VERIFIED_PHASE='+$lastPhase)
+            $match=[regex]::Match($record,$known)
             $code=if($match.Success){$match.Value}else{'PRIVATE_BUILD_FAILED_DETAILS_RETAINED_ONLY_ON_EPHEMERAL_WINDOWS_RUNNER'}
             throw $code
           }
