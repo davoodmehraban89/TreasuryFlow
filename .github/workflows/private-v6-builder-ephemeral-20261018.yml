@@ -45,6 +45,13 @@ jobs:
           $archive=Join-Path $work 'TreasuryFlow_Validation_Staging_20261017.zip'
           & gh release download validation-inputs-20261017 --repo $private --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir $work *> (Join-Path $work 'release-fetch.log')
           if($LASTEXITCODE -ne 0){throw 'PRIVATE_RELEASE_DOWNLOAD_FAILED'}
+          # The private read-only GitHub token is ONLY for fetching inputs.
+          # electron-builder can infer an unintended publish/update provider
+          # from GH_TOKEN after NSIS has otherwise successfully built.
+          Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:TF_VALIDATION_READ_TOKEN -ErrorAction SilentlyContinue
+          Write-Host 'GATE_PASS_PRIVATE_DOWNLOAD_TOKEN_CLEARED_BEFORE_PACKAGING'
           $destination=Join-Path $work 'run-once-candidate'
           $privateLog=Join-Path $work 'full-builder-log-private.txt'
           $errors=$null
