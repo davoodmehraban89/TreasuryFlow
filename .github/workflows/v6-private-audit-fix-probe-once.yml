@@ -1,0 +1,95 @@
+name: V6 production dependency vulnerability safe fix probe (NOT V7)
+on:
+  push:
+    branches: ['ci/public-windows-bridge-probe-20261017']
+    paths: ['.github/workflows/v6-private-audit-fix-probe-once.yml']
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ: '0'
+      TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ: '0'
+    steps:
+      - name: Receive SHA256 verified private V6 staging with step scoped read-only token
+        env:
+          GH_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          gh release download validation-inputs-20261017 --repo davoodmehraban89/TreasuryFlow-Validation-Private --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir "$RUNNER_TEMP" >/dev/null 2>&1
+          f="$RUNNER_TEMP/TreasuryFlow_Validation_Staging_20261017.zip"
+          test "$(sha256sum "$f" | cut -d' ' -f1)" = '9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f'
+          mkdir -p "$RUNNER_TEMP/private-v6-audit"
+          unzip -q "$f" -d "$RUNNER_TEMP/private-v6-audit"
+          echo "TF_STAGE=$RUNNER_TEMP/private-v6-audit" >> "$GITHUB_ENV"
+          echo 'GATE_PASS_PRIVATE_INPUT_SHA256'
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run package audit and compatible fix without exposing private package lock or advisories
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$TF_STAGE"
+          npm ci --no-audit --no-fund > "$RUNNER_TEMP/private-npm.log" 2>&1
+          npm audit --omit=dev --json > "$RUNNER_TEMP/private-audit-before.json" 2>/dev/null || true
+          cat > "$RUNNER_TEMP/audit-report.mjs" <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const file=process.argv[2],prefix=process.argv[3];
+          const x=JSON.parse(fs.readFileSync(file,'utf8'));
+          const v=x.metadata?.vulnerabilities;
+          if(!v)process.exit(12);
+          for(const k of ['critical','high','moderate','low','total'])console.log(prefix+'_COUNT_'+k.toUpperCase()+'='+Number(v[k]||0));
+          const security=x.vulnerabilities||{};
+          const affected=Object.entries(security).filter(([name,item])=>item.severity==='high'||item.severity==='critical');
+          console.log(prefix+'_HIGH_PACKAGE_COUNT='+affected.length);
+          const known=['xlsx','exceljs','next','react','mssql','axios','tar','glob','minimatch','undici','ws','node-forge','xml2js','form-data','lodash','lodash.merge','follow-redirects'];
+          for(const [name,item] of affected) {
+            const label=known.includes(name)?name:'UNLISTED_DEPENDENCY';
+            console.log(prefix+'_HIGH_PACKAGE='+label);
+            console.log(prefix+'_HIGH_FIX_AVAILABLE='+Boolean(item.fixAvailable));
+            console.log(prefix+'_HIGH_IS_DIRECT='+Boolean(item.isDirect));
+          }
+          NODE
+          node "$RUNNER_TEMP/audit-report.mjs" "$RUNNER_TEMP/private-audit-before.json" BEFORE
+          set +e
+          npm audit fix --omit=dev --no-fund > "$RUNNER_TEMP/private-audit-fix.log" 2>&1
+          exitCode=$?
+          set -e
+          echo "COMPATIBLE_AUDIT_FIX_EXIT_ZERO=$([ "$exitCode" -eq 0 ] && echo true || echo false)"
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund > "$RUNNER_TEMP/private-lock-refresh.log" 2>&1
+          npm ci --no-audit --no-fund > "$RUNNER_TEMP/private-reinstall.log" 2>&1
+          npm audit --omit=dev --json > "$RUNNER_TEMP/private-audit-after.json" 2>/dev/null || true
+          node "$RUNNER_TEMP/audit-report.mjs" "$RUNNER_TEMP/private-audit-after.json" AFTER
+          cat > "$RUNNER_TEMP/lock-compare.mjs" <<'NODE'
+          import fs from 'node:fs';
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          console.log('LOCK_POST_FIX_FORMAT='+Number(p.lockfileVersion||0));
+          NODE
+          node "$RUNNER_TEMP/lock-compare.mjs" package-lock.json
+      - name: Retest source after compatible security fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$TF_STAGE"
+          npm test -- --reporter=dot > "$RUNNER_TEMP/private-tests-after-audit-fix.log" 2>&1 || { echo 'AFTER_FIX_UNIT_TESTS_FAILED'; exit 1; }
+          echo 'GATE_PASS_AFTER_FIX_UNIT_TESTS'
+          npm run typecheck > "$RUNNER_TEMP/private-typecheck-after-audit.log" 2>&1 || { echo 'AFTER_FIX_TYPECHECK_FAILED'; exit 1; }
+          echo 'GATE_PASS_AFTER_FIX_TYPECHECK'
+          npm run lint > "$RUNNER_TEMP/private-lint-after-audit.log" 2>&1 || { echo 'AFTER_FIX_LINT_FAILED'; exit 1; }
+          echo 'GATE_PASS_AFTER_FIX_LINT'
+          npm run build > "$RUNNER_TEMP/private-build-after-audit.log" 2>&1 || { echo 'AFTER_FIX_NEXT_BUILD_FAILED'; exit 1; }
+          echo 'GATE_PASS_AFTER_FIX_NEXT_BUILD'
+      - name: No public upload or acceptance claim
+        if: always()
+        run: |
+          echo 'SCOPE=EPHEMERAL_PACKAGE_LOCK_COMPATIBLE_SECURITY_FIX_PROBE'
+          echo 'PRIVATE_PACKAGE_LOCK_BINARY_SOURCE_AND_LOGS=NOT_UPLOADED'
+          echo 'V7_RELEASE=BLOCKED_PENDING_PATCHED_PRIVATE_ASSET_AND_ACCEPTANCE'
