@@ -1,0 +1,196 @@
+name: Windows V6 rebuilt installer and OS clipboard acceptance (NOT V7)
+on:
+  push:
+    branches: ['ci/public-windows-bridge-probe-20261017']
+    paths: ['.github/workflows/windows-v6-rebuilt-installed-gui-lab-once.yml']
+permissions:
+  contents: read
+concurrency:
+  group: tf-v6-rebuilt-gui-one-shot
+  cancel-in-progress: false
+jobs:
+  windows-acceptance:
+    runs-on: windows-2022
+    timeout-minutes: 85
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ: '0'
+      TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ: '0'
+      TREASURYFLOW_ENABLE_SQL_LAB: '0'
+      TREASURYFLOW_DESKTOP_LOCAL: '1'
+      NEXT_TELEMETRY_DISABLED: '1'
+      ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES: 'false'
+    steps:
+      - name: Download exact V6 archive and private guarded repair with read-only step token
+        env:
+          GH_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:GH_TOKEN)){throw 'PRIVATE_TOKEN_MISSING'}
+          $input=Join-Path $env:RUNNER_TEMP 'private-input'
+          $stage=Join-Path $env:RUNNER_TEMP 'private-stage'
+          New-Item -ItemType Directory -Force -Path $input,$stage | Out-Null
+          gh release download validation-inputs-20261017 --repo davoodmehraban89/TreasuryFlow-Validation-Private --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir $input 1>$null 2>$null
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_ZIP_DOWNLOAD_FAILED'}
+          $zip=Join-Path $input 'TreasuryFlow_Validation_Staging_20261017.zip'
+          if((Get-FileHash $zip -Algorithm SHA256).Hash -ine '9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f'){throw 'STAGING_SHA256_FAILED'}
+          Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
+          if(!(Test-Path -LiteralPath (Join-Path $stage 'package.json'))){throw 'STAGING_ROOT_MISSING'}
+          $raw=gh api 'repos/davoodmehraban89/TreasuryFlow-Validation-Private/contents/qa/patches/v6-sql-assertion-fix.mjs?ref=2265e7e370d254eaa09988164559b2cd0c10c0d7' 2>$null | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0 -or !$raw.content){throw 'PRIVATE_PATCH_FETCH_FAILED'}
+          $patch=Join-Path $env:RUNNER_TEMP 'v6-private-test-assertion-fix.mjs'
+          [IO.File]::WriteAllBytes($patch,[Convert]::FromBase64String(($raw.content -replace '\s','')))
+          "TF_PRIVATE_STAGE=$stage" >> $env:GITHUB_ENV
+          "TF_PRIVATE_PATCH=$patch" >> $env:GITHUB_ENV
+          Write-Host 'GATE_PASS_STAGING_PRIVATE_PROVENANCE'
+      - name: Setup Node 22 with private token absent
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Patch exact test assertion and run all source gates without raw private logs
+        run: |
+          $ErrorActionPreference='Continue'
+          $PSNativeCommandUseErrorActionPreference=$false
+          Set-Location -LiteralPath $env:TF_PRIVATE_STAGE
+          node $env:TF_PRIVATE_PATCH $env:TF_PRIVATE_STAGE *> (Join-Path $env:RUNNER_TEMP 'private-patch.log')
+          if($LASTEXITCODE -ne 0){throw 'GUARDED_SQL_ASSERTION_PATCH_FAILED'}
+          Write-Host 'GATE_PASS_GUARDED_ASSERTION_PATCH'
+          $gates=@(
+            @{label='NPM_CI';argv=@('ci','--no-audit','--no-fund')},
+            @{label='UNIT_TESTS';argv=@('test','--','--reporter=dot')},
+            @{label='TYPECHECK';argv=@('run','typecheck')},
+            @{label='LINT';argv=@('run','lint')},
+            @{label='NEXT_BUILD';argv=@('run','build')}
+          )
+          foreach($g in $gates){
+            & npm @($g.argv) *> (Join-Path $env:RUNNER_TEMP ("private-gate-"+$g.label+".log"))
+            if($LASTEXITCODE -ne 0){throw ("GATE_FAIL_"+$g.label+"_PRIVATE_OUTPUT_WITHHELD")}
+            Write-Host ("GATE_PASS_"+$g.label)
+          }
+          node scripts/prepare-standalone.mjs *> (Join-Path $env:RUNNER_TEMP 'private-standalone.log')
+          if($LASTEXITCODE -ne 0){throw 'GATE_FAIL_STANDALONE'}
+          Write-Host 'GATE_PASS_STANDALONE'
+          npm run smoke *> (Join-Path $env:RUNNER_TEMP 'private-standalone-smoke.log')
+          if($LASTEXITCODE -ne 0){throw 'GATE_FAIL_STANDALONE_SMOKE'}
+          Write-Host 'GATE_PASS_STANDALONE_SMOKE'
+      - name: Build an actual ephemeral NSIS Setup from patched private V6 staging
+        run: |
+          $ErrorActionPreference='Continue'
+          $PSNativeCommandUseErrorActionPreference=$false
+          Set-Location -LiteralPath $env:TF_PRIVATE_STAGE
+          & npx --no-install electron-builder --win nsis --x64 --publish never *> (Join-Path $env:RUNNER_TEMP 'private-installer-build.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_V6_NSIS_BUILD_FAILED'}
+          $setup=@(Get-ChildItem (Join-Path $env:TF_PRIVATE_STAGE 'release') -Recurse -File -Filter 'TreasuryFlow-Setup-*-Windows-x64.exe' -ErrorAction SilentlyContinue)
+          if($setup.Count -ne 1 -or $setup[0].Length -lt 1000000){throw 'PRIVATE_SETUP_OUTPUT_NOT_UNIQUE'}
+          "TF_EPHEMERAL_NSIS_SETUP=$($setup[0].FullName)" >> $env:GITHUB_ENV
+          Write-Host 'GATE_PASS_PRIVATE_V6_NSIS_INSTALLER_BUILD'
+          Write-Host ('INSTALLER_SHA256='+((Get-FileHash $setup[0].FullName -Algorithm SHA256).Hash))
+      - name: Install actual private V6 NSIS Setup into isolated Windows VM
+        id: install
+        run: |
+          $ErrorActionPreference='Stop'
+          $dest=Join-Path $env:RUNNER_TEMP 'TreasuryFlow-V6-Isolated-Installed'
+          $process=Start-Process -FilePath $env:TF_EPHEMERAL_NSIS_SETUP -ArgumentList @('/S',('/D='+$dest)) -PassThru
+          if(!$process.WaitForExit(240000)){try{$process.Kill()}catch{};throw 'V6_NSIS_INSTALL_TIMEOUT'}
+          if($process.ExitCode -ne 0){throw 'V6_NSIS_NONZERO_EXIT'}
+          $installed=@(Get-ChildItem -LiteralPath $dest -Recurse -Filter 'TreasuryFlow.exe' -File -ErrorAction SilentlyContinue)
+          if($installed.Count -ne 1){throw 'INSTALLED_V6_EXE_NOT_UNIQUE'}
+          "TF_INSTALLED_V6_EXE=$($installed[0].FullName)" >> $env:GITHUB_ENV
+          "TF_V6_INSTALL_DIR=$dest" >> $env:GITHUB_ENV
+          Write-Host 'GATE_PASS_ACTUAL_V6_NSIS_INSTALL'
+      - name: Real Electron GUI and OS clipboard acceptance using synthetic SQL only
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference='Continue'
+          $PSNativeCommandUseErrorActionPreference=$false
+          $probe=Join-Path $env:RUNNER_TEMP 'tf-native-gui-os-copy.mjs'
+          @'
+          import assert from 'node:assert/strict';
+          import {spawn,execFileSync} from 'node:child_process';
+          import {writeFileSync} from 'node:fs';
+          import {join} from 'node:path';
+          const exe=process.argv[2];const out=process.argv[3];
+          const report={integrations:false,writable:false,select:false,copyButton:false,osClipboard:false,bankDisabled:false,stage:'START',status:'NOT_RUN'};
+          const sleep=ms=>new Promise(ok=>setTimeout(ok,ms));
+          async function wait(fn,ms=75000){const end=Date.now()+ms;while(Date.now()<end){try{let v=await fn();if(v)return v}catch{}await sleep(600)}throw Error('TIMEOUT_'+report.stage)}
+          const port=9568,base='http://127.0.0.1:3210';
+          async function wsConnect(url){
+           const ws=new WebSocket(url);await new Promise((ok,no)=>{const t=setTimeout(()=>no(Error('WS_TIMEOUT')),10000);ws.addEventListener('open',()=>{clearTimeout(t);ok()},{once:true});ws.addEventListener('error',()=>{clearTimeout(t);no(Error('WS_ERROR'))},{once:true})});
+           let id=0;const pending=new Map();
+           ws.addEventListener('message',ev=>{let msg;try{msg=JSON.parse(ev.data)}catch{return}const p=pending.get(msg.id);if(!p)return;pending.delete(msg.id);clearTimeout(p.t);msg.error?p.no(Error('CDP_ERROR')):p.ok(msg.result)});
+           const call=(method,params={})=>new Promise((ok,no)=>{const i=++id,t=setTimeout(()=>{pending.delete(i);no(Error('CDP_TIMEOUT'))},16000);pending.set(i,{ok,no,t});ws.send(JSON.stringify({id:i,method,params}))});
+           const evalJs=async code=>{const r=await call('Runtime.evaluate',{expression:code,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error('GUI_EVALUATION_ERROR');return r.result?.value};
+           await call('Runtime.enable');await call('Page.enable');return {ws,call,evalJs};
+          }
+          let process,conn;
+          try{
+           report.stage='LAUNCH';
+           const prev=await fetch(base+'/api/ready',{signal:AbortSignal.timeout(1600)}).then(()=>true,()=>false);
+           assert(!prev,'STALE_SERVER');
+           process=spawn(exe,['--remote-debugging-port='+port,'--remote-allow-origins=*'],{stdio:'ignore',windowsHide:false,env:{...globalThis.process.env,BANK_ADAPTER_MODE:'disabled',TREASURYFLOW_DESKTOP_LOCAL:'1',TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ:'0',TREASURYFLOW_ENABLE_SQL_LAB:'0',TREASURYFLOW_DATA_FILE:join(out,'isolated-synthetic.sqlite')}});
+           report.stage='BACKEND';
+           const ready=await wait(async()=>{const x=await fetch(base+'/api/ready',{signal:AbortSignal.timeout(1500)});return x.ok?x.json():null});
+           assert(ready.status==='ready'&&ready.bankAdapter==='disabled','READINESS_CONTRACT_INVALID');
+           report.bankDisabled=true;
+           report.stage='CDP';
+           const pages=async()=>{const r=await fetch('http://127.0.0.1:'+port+'/json/list',{signal:AbortSignal.timeout(1500)});return r.ok?r.json():[]};
+           const first=await wait(async()=>{const x=await pages();return x.find(y=>y.type==='page'&&y.url?.startsWith(base)&&y.webSocketDebuggerUrl)});
+           conn=await wsConnect(first.webSocketDebuggerUrl);
+           report.stage='SQL_PAGE';
+           await conn.call('Page.navigate',{url:base+'/integrations'}).catch(()=>null);
+           let last='';
+           await wait(async()=>{const x=await pages();const p=x.find(z=>z.type==='page'&&z.url?.startsWith(base+'/integrations')&&z.webSocketDebuggerUrl);if(!p)return false;if(p.webSocketDebuggerUrl!==last){try{conn.ws.close()}catch{}conn=await wsConnect(p.webSocketDebuggerUrl);last=p.webSocketDebuggerUrl}return conn.evalJs("location.pathname==='/integrations'&&!!document.querySelector('textarea')&&document.body?.innerText.includes('اتصال به دیتابیس')")});
+           report.integrations=true;
+           report.stage='EDITOR';
+           const state=await conn.evalJs("(()=>{const f=document.querySelector('textarea');f.focus();f.select();return {ro:f.readOnly,disabled:f.disabled,buttons:[...document.querySelectorAll('button')].map(b=>b.textContent?.trim())}})()");
+           assert(!state.ro&&!state.disabled,'SQL_EDITOR_NOT_EDITABLE');
+           assert(state.buttons.some(x=>x?.includes('انتخاب متن')),'SELECT_BUTTON_MISSING');
+           assert(state.buttons.some(x=>x?.includes('کپی کوئری')),'COPY_BUTTON_MISSING');
+           report.copyButton=true;
+           const sql='SELECT TOP (7) 7 AS ClipboardAcceptanceProbe';
+           await conn.call('Input.insertText',{text:sql});
+           await wait(()=>conn.evalJs('document.querySelector("textarea")?.value==='+JSON.stringify(sql)),10000);
+           report.writable=true;
+           report.stage='SELECTION';
+           await conn.evalJs("(()=>{[...document.querySelectorAll('button')].find(b=>b.textContent?.includes('انتخاب متن')).click();return true})()");
+           assert(await conn.evalJs("(()=>{const f=document.querySelector('textarea');return f.selectionStart===0&&f.selectionEnd===f.value.length})()"),'REAL_SELECT_TEXT_ACTION_FAILED');
+           report.select=true;
+           report.stage='WINDOWS_OS_CLIPBOARD';
+           await conn.evalJs("(()=>{[...document.querySelectorAll('button')].find(b=>b.textContent?.includes('کپی کوئری')).click();return true})()");
+           await wait(()=>execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command','Get-Clipboard -Raw'],{encoding:'utf8',timeout:4500}).trim()===sql,15000);
+           report.osClipboard=true;
+           report.status='PASS';
+           console.log('GATE_PASS_REAL_WINDOWS_INSTALLED_ELECTRON_SQL_COPY_AND_SELECT');
+          }catch(e){report.status='FAIL';report.failure=String(e.message||e).slice(0,90).replace(/[^A-Za-z0-9_ ]/g,'_');console.error('GUI_GATE_FAIL_'+report.failure);globalThis.process.exitCode=1}
+          finally{try{conn?.ws.close()}catch{}if(process?.pid){try{execFileSync('taskkill.exe',['/PID',String(process.pid),'/T','/F'],{stdio:'ignore',timeout:10000})}catch{}}writeFileSync(join(out,'private-gui-report.json'),JSON.stringify(report))}
+          '@ | Set-Content -LiteralPath $probe -Encoding utf8
+          $reportDir=Join-Path $env:RUNNER_TEMP 'private-tf-gui'
+          New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
+          node $probe $env:TF_INSTALLED_V6_EXE $reportDir *> (Join-Path $env:RUNNER_TEMP 'private-gui-output.log')
+          $result=Get-Content (Join-Path $reportDir 'private-gui-report.json') -Raw | ConvertFrom-Json
+          foreach($key in @('integrations','writable','select','copyButton','osClipboard','bankDisabled')){
+            Write-Host ("GUI_"+$key+"="+[bool]$result.$key)
+          }
+          if($LASTEXITCODE -ne 0 -or $result.status -ne 'PASS'){throw ('INSTALLED_GUI_'+[string]$result.stage+'_FAILED')}
+          Write-Host 'GATE_PASS_ACTUAL_WINDOWS_OS_CLIPBOARD'
+      - name: Silent uninstall of actual private V6 Setup
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $uninstaller=@(Get-ChildItem $env:TF_V6_INSTALL_DIR -Recurse -File -ErrorAction SilentlyContinue | Where-Object {$_.Name -match '^uninstall.*\.exe$'})
+          if($uninstaller.Count -ne 1){throw 'V6_NSIS_UNINSTALLER_NOT_FOUND'}
+          $proc=Start-Process -FilePath $uninstaller[0].FullName -ArgumentList '/S' -PassThru
+          if(!$proc.WaitForExit(90000)){try{$proc.Kill()}catch{};throw 'V6_UNINSTALL_TIMEOUT'}
+          if($proc.ExitCode -ne 0){throw 'V6_UNINSTALL_NONZERO'}
+          $remaining=@(Get-ChildItem $env:TF_V6_INSTALL_DIR -Recurse -File -Filter 'TreasuryFlow.exe' -ErrorAction SilentlyContinue)
+          if($remaining.Count -ne 0){throw 'V6_UNINSTALL_LEFT_EXECUTABLE'}
+          Write-Host 'GATE_PASS_REAL_V6_NSIS_UNINSTALL'
+      - name: Strictly bound scope of this validation
+        if: always()
+        run: |
+          Write-Host 'PRIVATE_SOURCE_BINARY_AND_RAW_TEST_LOGS=NOT_UPLOADED'
+          Write-Host 'PRODUCTION_BANK_DISABLED=true; MAYAN_EXTERNAL_READ_DISABLED=true'
+          Write-Host 'V7_FINAL_ACCEPTANCE=NOT_TESTED; SQL_SERVER_APP_ADAPTER=NOT_TESTED; UPGRADE_ROLLBACK=NOT_TESTED'
