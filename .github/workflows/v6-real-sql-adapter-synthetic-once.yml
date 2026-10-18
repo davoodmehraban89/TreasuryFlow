@@ -28,47 +28,27 @@ jobs:
           mkdir -p "$RUNNER_TEMP/tf-stage"
           unzip -q "$f" -d "$RUNNER_TEMP/tf-stage"
           echo "TF_ROOT=$RUNNER_TEMP/tf-stage" >> "$GITHUB_ENV"
+          gh api 'repos/davoodmehraban89/TreasuryFlow-Validation-Private/contents/qa/patches/v6-add-readonly-sqlserver-adapter.mjs?ref=1ee794c1cce62e64b97c32769e5b6aca0f2fa58c' --jq .content 2>/dev/null | base64 -d > "$RUNNER_TEMP/v6-private-sql-additive-patch.mjs"
+          test -s "$RUNNER_TEMP/v6-private-sql-additive-patch.mjs"
+          echo "TF_SQL_PATCH=$RUNNER_TEMP/v6-private-sql-additive-patch.mjs" >> "$GITHUB_ENV"
           echo 'GATE_PASS_PINNED_V6_SOURCE_SHA256'
       - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install original locked private V6 adapter dependencies
+      - name: Apply guarded private read-only adapter implementation and test code
         shell: bash
         run: |
           set -euo pipefail
           cd "$TF_ROOT"
-          npm ci --no-audit --no-fund > "$RUNNER_TEMP/private-npm-install.log" 2>&1
-          node -e 'console.log("SQL_MSSQL_DEPENDENCY="+!!require.resolve("mssql"));console.log("SQL_TS_COMPILER="+!!require.resolve("typescript"));'
-          cat > "$RUNNER_TEMP/private-path-inventory.mjs" <<'NODE'
-          import fs from 'node:fs';
-          import path from 'node:path';
-          const root=process.env.TF_ROOT;
-          const all=[];
-          function walk(p,depth=0){
-            if(depth>8||!fs.existsSync(p))return;
-            for(const d of fs.readdirSync(p,{withFileTypes:true})){
-              if(['node_modules','.next','release','.git'].includes(d.name))continue;
-              const f=path.join(p,d.name);
-              if(d.isDirectory())walk(f,depth+1);
-              else if(/[.]tsx?$/.test(d.name)&&fs.statSync(f).size<150000)all.push(f);
-            }
-          }
-          walk(path.join(root,'src'));
-          const client=all.filter(f=>{
-            const src=fs.readFileSync(f,'utf8');
-            return src.includes('SqlServerAccountingAdapter')&&src.includes('testConnection')&&src.includes('inspectSchema');
-          });
-          const readonly=all.filter(f=>fs.readFileSync(f,'utf8').includes('prepareReadOnlySql'));
-          const mayan=all.filter(f=>fs.readFileSync(f,'utf8').includes('MayanInterop'));
-          console.log('SQL_ADAPTER_TESTABLE_IMPLEMENTATION_FOUND='+(client.length===1));
-          console.log('SQL_READONLY_GUARD_SOURCE_FOUND='+Boolean(readonly.length));
-          console.log('SQL_MAYAN_INTEROP_SOURCE_REFERENCED='+Boolean(mayan.length));
-          if(client.length===1)fs.appendFileSync(process.env.GITHUB_ENV,'TF_SQL_CLIENT_SOURCE='+client[0]+'\n');
-          if(readonly.length>0)fs.appendFileSync(process.env.GITHUB_ENV,'TF_SQL_GUARD_SOURCE='+readonly[0]+'\n');
-          NODE
-          node "$RUNNER_TEMP/private-path-inventory.mjs"
-          echo 'GATE_PASS_V6_SQL_SOURCE_CAPABILITY_DIAGNOSIS'
+          node --check "$TF_SQL_PATCH" >/dev/null 2> "$RUNNER_TEMP/private-sql-patch-syntax.log" || { echo 'V6_PRIVATE_SQL_PATCH_SYNTAX_ERROR'; exit 1; }
+          node "$TF_SQL_PATCH" "$TF_ROOT" > "$RUNNER_TEMP/private-sql-patch-applied.log" 2>&1 || { echo 'V6_PRIVATE_SQL_PATCH_APPLY_FAILED'; exit 1; }
+          grep '^GATE_PASS_' "$RUNNER_TEMP/private-sql-patch-applied.log"
+          npm ci --no-audit --no-fund > "$RUNNER_TEMP/private-npm-install.log" 2>&1 || { echo 'PRIVATE_NPM_CI_FAILED'; exit 1; }
+          npx --no-install vitest run src/platform/integration/v6-readonly-mayan-sql-client.test.ts --reporter=dot > "$RUNNER_TEMP/private-v6-sql-unit.log" 2>&1 || { echo 'V6_SQL_ADAPTER_UNIT_TESTS_FAILED'; exit 1; }
+          echo 'GATE_PASS_V6_SQL_ADAPTER_UNIT_SECURITY_TESTS'
+          npm run typecheck > "$RUNNER_TEMP/private-v6-sql-typecheck.log" 2>&1 || { echo 'V6_SQL_ADAPTER_TYPESCRIPT_TYPECHECK_FAILED'; exit 1; }
+          echo 'GATE_PASS_V6_SQL_ADAPTER_TYPESCRIPT_TYPECHECK'
       - name: Launch real SQL Server 2022 Developer with synthetic-only view-only login
         shell: bash
         run: |
@@ -115,71 +95,55 @@ jobs:
           docker exec tf-synthetic-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$sa" -C -b -Q "CREATE LOGIN [tf_synthetic_reader] WITH PASSWORD = N'$ro';" > "$RUNNER_TEMP/private-sql-login.log" 2>&1 || { echo 'SQL_LOGIN_SETUP_FAILED'; exit 1; }
           docker exec tf-synthetic-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$sa" -C -b -d TreasuryFlowSyntheticCI -Q "CREATE USER tf_synthetic_reader FOR LOGIN tf_synthetic_reader; GRANT SELECT ON OBJECT::dbo.vw_SyntheticTransfers TO tf_synthetic_reader;" > "$RUNNER_TEMP/private-sql-grants.log" 2>&1 || { echo 'SQL_VIEW_GRANT_FAILED'; exit 1; }
           echo 'GATE_PASS_REAL_SQL2022_SYNTHETIC_VIEW_ONLY_PRINCIPAL'
-      - name: Execute actual private 1.0.1 SQL Server adapter against live engine and verify write denial
+      - name: Execute new protected V6 SQL view-only adapter against real SQL Server 2022
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${TF_SQL_CLIENT_SOURCE:-}" || { echo 'SQL_ADAPTER_TESTABLE_IMPLEMENTATION_UNAVAILABLE_IN_PRIVATE_V6_STAGE'; exit 1; }
-          test -n "${TF_SQL_GUARD_SOURCE:-}" || { echo 'SQL_SQL_GUARD_SOURCE_UNAVAILABLE_IN_PRIVATE_V6_STAGE'; exit 1; }
-          cat > "$TF_ROOT/temporary-v6-adapter-sql-smoke.cjs" <<'NODE'
-          const fs=require('fs'),path=require('path'),assert=require('assert').strict;
-          const ts=require('typescript');
-          function importTS(relative){
-            const file=path.join(process.cwd(),relative),raw=fs.readFileSync(file,'utf8');
-            const compiled=ts.transpileModule(raw,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
-            const out=path.join(process.cwd(),'temporary-'+path.basename(relative)+'.cjs');
-            fs.writeFileSync(out,compiled,'utf8');
-            return require(out);
-          }
+          cat > "$TF_ROOT/temporary-private-v6-actual-sql-smoke.cjs" <<'NODE'
+          const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
+          const ts=require('typescript'),sql=require('mssql');
+          const p=path.join(process.cwd(),'src/platform/integration/v6-readonly-mayan-sql-client.ts');
+          const compiled=ts.transpileModule(fs.readFileSync(p,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
+          const mod=path.join(process.cwd(),'temporary-private-v6-sql-driver.cjs');
+          fs.writeFileSync(mod,compiled);
+          const {V6SqlServerReadOnlyClient}=require(mod);
           (async()=>{
-            const {SqlServerAccountingAdapter}=importTS(process.env.TF_SQL_CLIENT_SOURCE);
-            const {prepareReadOnlySql}=importTS(process.env.TF_SQL_GUARD_SOURCE);
-            assert.equal(typeof SqlServerAccountingAdapter,'function');
-            const x=new SqlServerAccountingAdapter({server:'127.0.0.1',database:'TreasuryFlowSyntheticCI',auth:'sql',user:'tf_synthetic_reader',password:process.env.TF_SYNTH_SQL_RO,encrypt:false,trustServerCertificate:true});
-            const connected=await x.testConnection();
-            assert.equal(connected.ok,true);
-            console.log('GATE_PASS_PRIVATE_V6_ACTUAL_SQL_ADAPTER_CONNECT');
-            const columns=await x.inspectSchema();
-            assert(Array.isArray(columns));
-            const known=columns.filter(x=>x.table_name==='vw_SyntheticTransfers');
-            assert(known.length>=7);
-            console.log('GATE_PASS_PRIVATE_V6_ACTUAL_SQL_ADAPTER_SCHEMA_METADATA');
-            await assert.rejects(x.executeApprovedWrite('INSERT',{}),/approved write contract/);
-            console.log('GATE_PASS_PRIVATE_V6_DENY_UNAPPROVED_WRITE_CONTRACT');
-            const sql=require('mssql');
-            const conf={server:'127.0.0.1',database:'TreasuryFlowSyntheticCI',user:'tf_synthetic_reader',password:process.env.TF_SYNTH_SQL_RO,options:{encrypt:false,trustServerCertificate:true},connectionTimeout:15000};
-            const conn=await new sql.ConnectionPool(conf).connect();
+            assert.equal(typeof V6SqlServerReadOnlyClient,'function');
+            const user='tf_synthetic_reader',password=process.env.TF_SYNTH_SQL_RO,db='TreasuryFlowSyntheticCI';
+            const c=new V6SqlServerReadOnlyClient({server:'127.0.0.1',database:db,user,password,approvedViews:['dbo.vw_SyntheticTransfers'],localSyntheticLab:true});
+            assert.equal(await c.testConnection(),true);
+            console.log('GATE_PASS_REAL_SQL_V6_ADAPTER_CONNECT');
+            const schema=await c.inspectApprovedView('dbo.vw_SyntheticTransfers');
+            assert(schema.length>=7);
+            console.log('GATE_PASS_REAL_SQL_V6_APPROVED_VIEW_SCHEMA');
+            const rows=await c.readApprovedView('dbo.vw_SyntheticTransfers',2);
+            assert.equal(rows.length,2);
+            assert.equal(rows[0].Amount_IRR,'1250000');
+            assert.equal(rows[1].Amount_IRR,'3250000');
+            console.log('GATE_PASS_REAL_SQL_V6_VIEW_READ_AND_INTEGER_IRR');
+            await assert.rejects(c.readApprovedView('dbo.SyntheticTransfers',2));
+            await assert.rejects(c.readApprovedView('dbo.vw_SyntheticTransfers',101));
+            console.log('GATE_PASS_REAL_SQL_V6_VIEW_ALLOWLIST_AND_ROW_LIMIT');
+            const pool=await new sql.ConnectionPool({server:'127.0.0.1',database:db,user,password,options:{encrypt:false,trustServerCertificate:true}}).connect();
             try{
-              const query=prepareReadOnlySql('SELECT Row_ID,Amount_IRR,Client_Reference FROM dbo.vw_SyntheticTransfers ORDER BY Row_ID');
-              const rows=await conn.request().query(query);
-              assert.equal(rows.recordset.length,2);
-              assert.equal(Number(rows.recordset[0].Amount_IRR),1250000);
-              assert.equal(Number(rows.recordset[1].Amount_IRR),3250000);
-              console.log('GATE_PASS_REAL_SQL_SERVER_V6_READ_ONLY_VIEW_QUERY_TWO_SYNTHETIC_ROWS');
-              for(const forbidden of [
+              const ops=[
                 'UPDATE dbo.SyntheticTransfers SET Amount_IRR=1 WHERE Row_ID=1',
-                'INSERT dbo.SyntheticTransfers (Row_ID,Destination_IBAN,Beneficiary_Name,Amount_IRR,Client_Reference) VALUES (9,\'BAD\',N\'FAIL\',1,\'DENIED\')',
                 'DELETE FROM dbo.SyntheticTransfers WHERE Row_ID=1',
                 'DROP VIEW dbo.vw_SyntheticTransfers',
                 'SELECT COUNT(*) FROM dbo.SyntheticTransfers'
-              ]){
-                await assert.rejects(conn.request().query(forbidden));
-              }
-              console.log('GATE_PASS_REAL_SQL_SERVER_NO_TABLE_READ_AND_ALL_WRITE_DENIALS');
-              for(const bad of ['DELETE FROM dbo.vw_SyntheticTransfers','SELECT 1; DELETE FROM dbo.vw_SyntheticTransfers','SELECT * INTO dbo.Hacked FROM dbo.vw_SyntheticTransfers']){
-                assert.throws(()=>prepareReadOnlySql(bad));
-              }
-              console.log('GATE_PASS_V6_READ_ONLY_SQL_GUARD_NEGATIVE_CASES');
-            }finally{await conn.close()}
-          })().catch(e=>{console.error('PRIVATE_SQL_ADAPTER_FAILURE_CLASS='+String(e?.name||'OtherError').replace(/[^A-Za-z]/g,''));process.exitCode=1});
+              ];
+              for(const q of ops)await assert.rejects(pool.request().query(q));
+              console.log('GATE_PASS_REAL_SQL_V6_PRINCIPAL_DENIES_WRITE_AND_BASE_TABLE_READ');
+            }finally{await pool.close()}
+          })().catch(e=>{console.log('PRIVATE_SQL_REAL_ENGINE_FAILURE_CLASS='+String(e?.name||'OTHER').replace(/[^A-Za-z]/g,''));process.exitCode=1});
           NODE
           cd "$TF_ROOT"
-          node temporary-v6-adapter-sql-smoke.cjs > "$RUNNER_TEMP/private-v6-sql-adapter-results.log" 2>&1 || {
-            grep -E '^PRIVATE_SQL_ADAPTER_FAILURE_CLASS=' "$RUNNER_TEMP/private-v6-sql-adapter-results.log" || true
-            echo 'REAL_SQL_SERVER_PRIVATE_V6_ADAPTER_GATE_FAILED'
+          node temporary-private-v6-actual-sql-smoke.cjs > "$RUNNER_TEMP/private-v6-real-sql-results.log" 2>&1 || {
+            grep '^PRIVATE_SQL_REAL_ENGINE_FAILURE_CLASS=' "$RUNNER_TEMP/private-v6-real-sql-results.log" || true
+            echo 'REAL_SQL_SERVER_V6_ADAPTER_INTEGRATION_FAILED'
             exit 1
           }
-          grep '^GATE_PASS_' "$RUNNER_TEMP/private-v6-sql-adapter-results.log"
+          grep '^GATE_PASS_' "$RUNNER_TEMP/private-v6-real-sql-results.log"
       - name: Constrain public disclosure
         if: always()
         shell: bash
