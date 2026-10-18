@@ -63,7 +63,11 @@ jobs:
            let list=[];for(let i=0;i<60;i++){list=await targets();if(list.some(x=>x.type==='page'&&x.webSocketDebuggerUrl))break;await wait(500)}
            const target=list.find(x=>x.type==='page'&&x.webSocketDebuggerUrl);
            flags.cdpTarget=!!target;flags.initialGroup=group(target?.url);
-           if(target){
+           await wait(12000);
+           flags.idleProcessAlive=app.exitCode===null;
+           const idleState=await ready();
+           flags.idleBackendReady=idleState?.status==='ready'&&idleState?.bankAdapter==='disabled';
+           if(target&&flags.idleProcessAlive&&flags.idleBackendReady){
             ws=new WebSocket(target.webSocketDebuggerUrl);
             await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('WS_CONNECT_TIMEOUT')),8000);ws.addEventListener('open',()=>{clearTimeout(timeout);resolve()},{once:true});ws.addEventListener('error',()=>{clearTimeout(timeout);reject(Error('WS_CONNECT_FAILED'))},{once:true})});
             const response=new Promise(resolve=>{const timeout=setTimeout(()=>resolve(null),12000);ws.addEventListener('message',evt=>{try{const x=JSON.parse(evt.data);if(x.id===42){clearTimeout(timeout);resolve(x)}}catch{}})});
@@ -77,7 +81,7 @@ jobs:
            flags.postNavTargetCount=post.length;
            flags.postNavLocalTargetCount=post.filter(x=>group(x.url)!=='NON_LOCAL'&&group(x.url)!=='BAD_URL').length;
            flags.postGroups=[...new Set(post.filter(x=>x.type==='page').map(x=>group(x.url)))].sort();
-           flags.windowsProcessAlive=app.exitCode===null;
+           flags.windowsProcessAlive=app.exitCode===null;flags.processExitCode=app.exitCode;
           }catch(e){flags.errorClass=String(e.message||e).replace(/[^A-Za-z0-9_]/g,'_').slice(0,60)}
           finally{try{ws?.close()}catch{}if(app?.pid){try{execFileSync('taskkill.exe',['/PID',String(app.pid),'/T','/F'],{stdio:'ignore',timeout:15000})}catch{}}}
           for(const [k,v] of Object.entries(flags))console.log('ROUTE_'+k+'='+JSON.stringify(v));
