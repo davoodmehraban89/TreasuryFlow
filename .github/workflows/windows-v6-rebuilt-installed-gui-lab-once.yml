@@ -81,8 +81,29 @@ jobs:
           $ErrorActionPreference='Continue'
           $PSNativeCommandUseErrorActionPreference=$false
           Set-Location -LiteralPath $env:TF_PRIVATE_STAGE
-          & npx --no-install electron-builder --win nsis --x64 --publish never *> (Join-Path $env:RUNNER_TEMP 'private-installer-build.log')
-          if($LASTEXITCODE -ne 0){throw 'PRIVATE_V6_NSIS_BUILD_FAILED'}
+          $log=Join-Path $env:RUNNER_TEMP 'private-installer-build.log'
+          & npx --no-install electron-builder --win nsis --x64 --publish never *> $log
+          $builderExit=$LASTEXITCODE
+          $txt=if(Test-Path -LiteralPath $log){Get-Content -LiteralPath $log -Raw}else{''}
+          $classes=[ordered]@{
+            SIGNING='code.sign|signature|signing|certificate|CSC_'
+            NSIS_TOOL='makensis|nsis|appBuilder'
+            DOWNLOAD='download|fetch|network|ECONNRESET|ETIMEDOUT|ENOTFOUND'
+            FILE_MISSING='ENOENT|no.such.file|not.found|file.does.not.exist|missing'
+            MODULE_MISSING='cannot.find.module|module.not.found|require.stack'
+            FILE_LOCK='EPERM|EACCES|access.is.denied'
+            CONFIG='configuration|invalid.config|schema|unsupported.target'
+            ASAR='asar|cannot.pack|archive'
+            PATH='path.too.long|filename.too.long'
+            DEPENDENCIES='dependencies|node_modules|npmRebuild|rebuild'
+            ELECTRON='electron|win-unpacked'
+            GENERIC_ERROR='Error:|⨯|error'
+          }
+          foreach($k in $classes.Keys){Write-Host ("BUILDER_LOG_HAS_"+$k+"="+[bool]($txt -match $classes[$k]))}
+          $setupBefore=@(Get-ChildItem (Join-Path $env:TF_PRIVATE_STAGE 'release') -Recurse -File -Filter 'TreasuryFlow-Setup-*-Windows-x64.exe' -ErrorAction SilentlyContinue)
+          Write-Host ("BUILDER_SETUP_FILE_COUNT="+$setupBefore.Count)
+          Write-Host ("BUILDER_PROCESS_EXIT_NONZERO="+[bool]($builderExit -ne 0))
+          if($builderExit -ne 0){throw 'PRIVATE_V6_NSIS_BUILD_FAILED_SANITIZED_DIAGNOSTIC_ABOVE'}
           $setup=@(Get-ChildItem (Join-Path $env:TF_PRIVATE_STAGE 'release') -Recurse -File -Filter 'TreasuryFlow-Setup-*-Windows-x64.exe' -ErrorAction SilentlyContinue)
           if($setup.Count -ne 1 -or $setup[0].Length -lt 1000000){throw 'PRIVATE_SETUP_OUTPUT_NOT_UNIQUE'}
           "TF_EPHEMERAL_NSIS_SETUP=$($setup[0].FullName)" >> $env:GITHUB_ENV
