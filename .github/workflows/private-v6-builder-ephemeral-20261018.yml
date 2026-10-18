@@ -29,7 +29,8 @@ jobs:
           New-Item -ItemType Directory -Path $work -Force | Out-Null
           $paths=@('qa/scripts/rebuild-v6-private-nonfinal-qa.ps1',
                    'qa/patches/v6-sql-assertion-fix.mjs',
-                   'qa/patches/v6-add-readonly-sqlserver-adapter.mjs')
+                   'qa/patches/v6-add-readonly-sqlserver-adapter.mjs',
+                   'qa/windows/v6-installed-native-gui-os-clipboard.mjs')
           foreach($path in $paths){
             $url="https://api.github.com/repos/$private/contents/${path}?ref=$branch"
             $api=Invoke-RestMethod -Uri $url -Headers @{ Authorization="Bearer $env:TF_VALIDATION_READ_TOKEN"; Accept='application/vnd.github+json'; 'User-Agent'='TreasuryFlow-private-qa' }
@@ -111,3 +112,48 @@ jobs:
           Write-Host 'PRIVATE_V6_PATCHED_SOURCE_AND_WINDOWS_SETUP_BUILD_PASS'
           Write-Host 'PRIVATE_V6_NPM_SECURITY_TEST_TYPECHECK_LINT_BUILD_SMOKE_PASS'
           Write-Host 'NO_SOURCE_OR_BINARY_UPLOADED_TO_PUBLIC_ARTIFACTS'
+          # Replay installed native GUI/clipboard acceptance on this exact built EXE.
+          & node --check (Join-Path $work $paths[3])
+          if($LASTEXITCODE -ne 0){throw 'INSTALLED_GUI_HARNESS_SYNTAX_FAILED'}
+          $env:BANK_ADAPTER_MODE='disabled'
+          $env:TREASURYFLOW_DESKTOP_LOCAL='1'
+          $env:TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ='0'
+          $env:TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ='0'
+          $env:TREASURYFLOW_ENABLE_SQL_LAB='0'
+          $isolation=Join-Path $env:RUNNER_TEMP 'v6-gui-test-data'
+          $installDir=Join-Path $env:RUNNER_TEMP 'TreasuryFlow-V6-Isolated-Installed'
+          New-Item -ItemType Directory -Path $isolation -Force | Out-Null
+          $install=Start-Process -FilePath $exe -ArgumentList @('/S',('/D='+$installDir)) -PassThru
+          if(!$install.WaitForExit(240000)){try{$install.Kill()}catch{};throw 'V6_NSIS_INSTALL_TIMEOUT'}
+          if($install.ExitCode -ne 0){throw 'V6_NSIS_NONZERO_EXIT'}
+          $installed=@(Get-ChildItem -LiteralPath $installDir -Recurse -Filter 'TreasuryFlow.exe' -File -ErrorAction SilentlyContinue)
+          if($installed.Count -ne 1){throw 'INSTALLED_V6_EXE_NOT_UNIQUE'}
+          Write-Host 'GATE_PASS_SAME_ARTIFACT_NSIS_INSTALL'
+          $guiLog=Join-Path $work 'private-installed-gui-log.txt'
+          & node (Join-Path $work $paths[3]) $installed[0].FullName $isolation *> $guiLog
+          if($LASTEXITCODE -ne 0){
+            $guiRecord=Get-Content (Join-Path $isolation 'private-gui-report.json') -Raw | ConvertFrom-Json
+            $safe=$guiRecord.failure -replace '[^A-Z0-9_ ]',''
+            if(!$safe){$safe='UNKNOWN'}
+            throw ('V6_SAME_ARTIFACT_INSTALLED_GUI_FAILED_'+$safe)
+          }
+          $guiRecord=Get-Content (Join-Path $isolation 'private-gui-report.json') -Raw | ConvertFrom-Json
+          if($guiRecord.status -ne 'PASS' -or !$guiRecord.osClipboard -or !$guiRecord.bankDisabled -or
+             !$guiRecord.copyButton -or !$guiRecord.writable -or !$guiRecord.select){throw 'V6_SAME_ARTIFACT_GUI_REPORT_FAIL'}
+          Write-Host 'GATE_PASS_SAME_ARTIFACT_INSTALLED_WINDOWS_OS_CLIPBOARD'
+          $uninstall=@(Get-ChildItem -LiteralPath $installDir -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object {$_.Name -match '^uninstall.*\\.exe
+})
+          if($uninstall.Count -ne 1){throw 'V6_NSIS_UNINSTALLER_NOT_FOUND'}
+          $uninstallProcess=Start-Process -FilePath $uninstall[0].FullName -ArgumentList '/S' -PassThru
+          if(!$uninstallProcess.WaitForExit(90000)){try{$uninstallProcess.Kill()}catch{};throw 'V6_UNINSTALL_TIMEOUT'}
+          if($uninstallProcess.ExitCode -ne 0){throw 'V6_UNINSTALL_NONZERO'}
+          for($i=0;$i -lt 90;$i++){
+            $remaining=@(Get-ChildItem -LiteralPath $installDir -Recurse -File -Filter 'TreasuryFlow.exe' -ErrorAction SilentlyContinue)
+            if($remaining.Count -eq 0){break}
+            Start-Sleep -Seconds 1
+          }
+          if($remaining.Count -gt 0){throw 'V6_UNINSTALL_LEFT_BINARY'}
+          Write-Host 'GATE_PASS_SAME_ARTIFACT_NSIS_UNINSTALL'
+          Write-Host 'V6_NONFINAL_PRIVATE_QA_10_PLUS_GATES_FULL_PASS'
+
