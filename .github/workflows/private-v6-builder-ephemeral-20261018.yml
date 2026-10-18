@@ -1,0 +1,62 @@
+name: Ephemeral private V6 builder verification (no uploads)
+on:
+  push:
+    paths:
+      - .github/workflows/private-v6-builder-ephemeral-20261018.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  private-builder:
+    runs-on: windows-2022
+    timeout-minutes: 70
+    steps:
+      - name: Install Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify private builder with pinned staging, without publishing files
+        shell: pwsh
+        env:
+          TF_VALIDATION_READ_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:TF_VALIDATION_READ_TOKEN)){throw 'PRIVATE_READ_TOKEN_NOT_AVAILABLE'}
+          $env:GH_TOKEN=$env:TF_VALIDATION_READ_TOKEN
+          $private='davoodmehraban89/TreasuryFlow-Validation-Private'
+          $branch='dev/v6-sql-editor-assertion-repair-20261017'
+          $work=Join-Path $env:RUNNER_TEMP 'v6-protected-builder'
+          New-Item -ItemType Directory -Path $work -Force | Out-Null
+          $paths=@('qa/scripts/rebuild-v6-private-nonfinal-qa.ps1',
+                   'qa/patches/v6-sql-assertion-fix.mjs',
+                   'qa/patches/v6-add-readonly-sqlserver-adapter.mjs')
+          foreach($path in $paths){
+            $url="https://api.github.com/repos/$private/contents/${path}?ref=$branch"
+            $api=Invoke-RestMethod -Uri $url -Headers @{ Authorization="Bearer $env:TF_VALIDATION_READ_TOKEN"; Accept='application/vnd.github+json'; 'User-Agent'='TreasuryFlow-private-qa' }
+            if(!$api.content -or $api.encoding -ne 'base64'){throw 'PRIVATE_TEXT_FETCH_FAILED'}
+            $dest=Join-Path $work $path
+            New-Item -ItemType Directory -Path (Split-Path $dest -Parent) -Force | Out-Null
+            [IO.File]::WriteAllBytes($dest,[Convert]::FromBase64String(($api.content -replace '\s','')))
+          }
+          $archive=Join-Path $work 'TreasuryFlow_Validation_Staging_20261017.zip'
+          & gh release download validation-inputs-20261017 --repo $private --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir $work *> (Join-Path $work 'release-fetch.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_RELEASE_DOWNLOAD_FAILED'}
+          $destination=Join-Path $work 'run-once-candidate'
+          $privateLog=Join-Path $work 'full-builder-log-private.txt'
+          & pwsh -NoProfile -File (Join-Path $work $paths[0]) -SourceArchive $archive -OutputRoot $destination *> $privateLog
+          if($LASTEXITCODE -ne 0) {
+            $known='ORIGINAL_PRIVATE_SOURCE_HASH_MISMATCH|UNSAFE_ZIP_ENTRY_PATH|ARCHIVE_ENTRY_COUNT_LIMIT|ZIP_UNCOMPRESSED_SIZE_LIMIT|ZIP_SYMLINK_DISALLOWED|DUPLICATE_ZIP_ENTRY|EXTRACTED_REPARSE_POINT_DISALLOWED|OFFICIAL_XLSX_PACKAGE_LOCK_INTEGRITY_NOT_PINNED_TO_VERIFIED_ARCHIVE|SHEETJS_OFFICIAL_VENDOR_SHA256_MISMATCH|KNOWN_PRODUCTION_DEPENDENCY_ADVISORIES_REMAIN|V6_UNIT_REGRESSION_FAILED|V6_GATE_FAILED_[A-Z]+|V6_NSIS_BUILDER_FAILED|READ_ONLY_SQL_ADAPTER_PATCH_FAILED|SQL_EDITOR_TEST_PATCH_FAILED'
+            $match=[regex]::Match((Get-Content $privateLog -Raw),$known)
+            $code=if($match.Success){$match.Value}else{'PRIVATE_BUILD_FAILED_DETAILS_RETAINED_ONLY_ON_EPHEMERAL_WINDOWS_RUNNER'}
+            throw $code
+          }
+          $deliverables=Join-Path $destination 'PRIVATE_QA_DELIVERABLES'
+          $proof=Get-Content (Join-Path $deliverables 'NONFINAL_QA_SHA256_MANIFEST.json') -Raw | ConvertFrom-Json
+          $source=Join-Path $deliverables 'TreasuryFlow_V6_1.0.1_Patched_NONFINAL_QA_Source.zip'
+          $exe=Join-Path $deliverables 'TreasuryFlow_V6_1.0.1_Patched_NONFINAL_QA_Setup.exe'
+          if(!(Test-Path $source) -or !(Test-Path $exe) -or $proof.finalRelease -ne $false -or $proof.v7FinalAccepted -ne $false -or $proof.productionNpmVulnerabilities -ne 0){throw 'NONFINAL_MANIFEST_POLICY_FAILED'}
+          if((Get-FileHash $source -Algorithm SHA256).Hash -ne $proof.patchedSourceSha256 -or
+             (Get-FileHash $exe -Algorithm SHA256).Hash -ne $proof.patchedInstallerSha256){throw 'NONFINAL_MANIFEST_DIGEST_MISMATCH'}
+          Write-Host 'PRIVATE_V6_PATCHED_SOURCE_AND_WINDOWS_SETUP_BUILD_PASS'
+          Write-Host 'PRIVATE_V6_NPM_SECURITY_TEST_TYPECHECK_LINT_BUILD_SMOKE_PASS'
+          Write-Host 'NO_SOURCE_OR_BINARY_UPLOADED_TO_PUBLIC_ARTIFACTS'
