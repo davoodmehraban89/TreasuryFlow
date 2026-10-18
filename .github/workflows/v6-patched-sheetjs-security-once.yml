@@ -1,0 +1,83 @@
+name: TreasuryFlow V6 official patched SheetJS 0.20.3 security regression (NOT V7)
+on:
+  push:
+    branches: ['ci/public-windows-bridge-probe-20261017']
+    paths: ['.github/workflows/v6-patched-sheetjs-security-once.yml']
+permissions:
+  contents: read
+jobs:
+  patched-xlsx:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ: '0'
+      TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ: '0'
+      TREASURYFLOW_ENABLE_SQL_LAB: '0'
+    steps:
+      - name: Verify immutable private V6 input using step-only private read token
+        env:
+          GH_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          gh release download validation-inputs-20261017 --repo davoodmehraban89/TreasuryFlow-Validation-Private --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir "$RUNNER_TEMP" >/dev/null 2>&1
+          f="$RUNNER_TEMP/TreasuryFlow_Validation_Staging_20261017.zip"
+          test "$(sha256sum "$f" | cut -d' ' -f1)" = '9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f'
+          mkdir -p "$RUNNER_TEMP/private-v6-source"
+          unzip -q "$f" -d "$RUNNER_TEMP/private-v6-source"
+          echo "TF_ROOT=$RUNNER_TEMP/private-v6-source" >> "$GITHUB_ENV"
+          echo 'PRIVATE_STAGING_SHA256_PASS'
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Replace vulnerable old npm xlsx with official vendor-patched 0.20.3 tarball in ephemeral staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$TF_ROOT"
+          npm ci --no-audit --no-fund > "$RUNNER_TEMP/private-npm-ci.log" 2>&1
+          curl -fsSL --retry 3 --max-time 90 https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz -o "$RUNNER_TEMP/vendor-patched-xlsx-0.20.3.tgz" > "$RUNNER_TEMP/vendor-download.log" 2>&1
+          test "$(wc -c < "$RUNNER_TEMP/vendor-patched-xlsx-0.20.3.tgz")" -gt 100000
+          vendorDigest=$(sha256sum "$RUNNER_TEMP/vendor-patched-xlsx-0.20.3.tgz" | cut -d' ' -f1)
+          echo "VENDOR_OFFICIAL_XLSX_0_20_3_SHA256=$vendorDigest"
+          npm uninstall xlsx --save --no-audit --no-fund > "$RUNNER_TEMP/private-uninstall-vulnerable.log" 2>&1
+          npm install --save --ignore-scripts --no-audit --no-fund https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz > "$RUNNER_TEMP/private-install-vendor.log" 2>&1
+          node -e 'const x=require("xlsx");if(x.version!=="0.20.3"){process.exit(2)};console.log("GATE_PASS_OFFICIAL_PATCHED_SHEETJS_VERSION")'
+          npm ci --no-audit --no-fund > "$RUNNER_TEMP/private-lock-reinstall.log" 2>&1
+          echo 'GATE_PASS_PATCHED_SHEETJS_LOCK_REPRODUCIBILITY'
+      - name: Verify zero known production npm audit advisories without suppressing audit
+        shell: bash
+        run: |
+          cd "$TF_ROOT"
+          npm audit --omit=dev --json > "$RUNNER_TEMP/private-vendor-audit.json" 2> "$RUNNER_TEMP/private-vendor-audit-stderr.log" || true
+          node -e '
+          const fs=require("fs");
+          const x=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/private-vendor-audit.json","utf8"));
+          const v=x.metadata?.vulnerabilities;
+          if(!v)process.exit(10);
+          for(const k of ["critical","high","moderate","low","total"])console.log("PATCHED_PRODUCTION_AUDIT_"+k.toUpperCase()+"="+Number(v[k]||0));
+          if(Number(v.critical||0)||Number(v.high||0)){process.exit(11)}
+          console.log("GATE_PASS_PATCHED_PRODUCTION_SECURITY_AUDIT_NO_HIGH_OR_CRITICAL");
+          '
+      - name: Rerun unit tests, TypeScript, lint and production build against patched SheetJS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$TF_ROOT"
+          npm test -- --reporter=dot > "$RUNNER_TEMP/private-tests-patched.log" 2>&1 || { echo 'PATCHED_XLSX_UNIT_TESTS_FAILED'; exit 1; }
+          echo 'GATE_PASS_SHEETJS_PATCHED_UNIT_TESTS'
+          npm run typecheck > "$RUNNER_TEMP/private-typecheck-patched.log" 2>&1 || { echo 'PATCHED_XLSX_TYPECHECK_FAILED'; exit 1; }
+          echo 'GATE_PASS_SHEETJS_PATCHED_TYPECHECK'
+          npm run lint > "$RUNNER_TEMP/private-lint-patched.log" 2>&1 || { echo 'PATCHED_XLSX_LINT_FAILED'; exit 1; }
+          echo 'GATE_PASS_SHEETJS_PATCHED_LINT'
+          npm run build > "$RUNNER_TEMP/private-next-patched.log" 2>&1 || { echo 'PATCHED_XLSX_BUILD_FAILED'; exit 1; }
+          echo 'GATE_PASS_SHEETJS_PATCHED_NEXT_BUILD'
+      - name: Zero public private-source artifact policy
+        if: always()
+        run: |
+          echo 'SCOPE=V6_EPHEMERAL_OFFICIAL_VENDOR_XLSX_CDN_REPLACEMENT'
+          echo 'NO_PRIVATE_SOURCE_PACKAGE_LOCK_OR_TEST_LOGS_UPLOADED'
+          echo 'V7_FINAL=NOT_TESTED'
