@@ -1,0 +1,93 @@
+name: V6 pinned original portable Electron routing probe (NOT V7)
+on:
+  push:
+    branches: ['ci/public-windows-bridge-probe-20261017']
+    paths: ['.github/workflows/windows-v6-original-gui-route-probe-once.yml']
+permissions:
+  contents: read
+jobs:
+  baseline:
+    runs-on: windows-2022
+    timeout-minutes: 18
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ: '0'
+      TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ: '0'
+      TREASURYFLOW_ENABLE_SQL_LAB: '0'
+      TREASURYFLOW_DESKTOP_LOCAL: '1'
+    steps:
+      - name: Read-only private download and original V6 binary SHA pin
+        env:
+          GH_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:GH_TOKEN)){throw 'READ_ONLY_TOKEN_MISSING'}
+          $root=Join-Path $env:RUNNER_TEMP 'private-old-v6'
+          New-Item -Force -ItemType Directory -Path $root | Out-Null
+          gh release download validation-inputs-20261017 --repo davoodmehraban89/TreasuryFlow-Validation-Private --pattern release-native-v6-final.rar --dir $root 1>$null 2>$null
+          if($LASTEXITCODE -ne 0){throw 'RAR_FETCH_FAILED'}
+          $rar=Join-Path $root 'release-native-v6-final.rar'
+          if((Get-FileHash $rar -Algorithm SHA256).Hash -ine 'b8629defc172cef972ad12bb3a2e45a55abed3a5e3a5d991ab2567b877e0c915'){throw 'RAR_SHA_FAIL'}
+          & 7z.exe x -y "-o$root" $rar *> (Join-Path $env:RUNNER_TEMP 'private-extract.log')
+          if($LASTEXITCODE -ne 0){throw 'RAR_EXTRACT_FAILED'}
+          $x=@(Get-ChildItem $root -Recurse -File -Filter TreasuryFlow-1.0.1-Windows-x64.exe)
+          if($x.Count -ne 1){throw 'PINNED_EXE_NOT_UNIQUE'}
+          if((Get-FileHash $x[0].FullName -Algorithm SHA256).Hash -ine '99976331f606d8c8ffcf8e9f4895848ff736870790e14b4c7f08a0abdbb7a50a'){throw 'EXE_SHA_FAIL'}
+          "TF_ORIGINAL_EXE=$($x[0].FullName)" >> $env:GITHUB_ENV
+          Write-Host 'GATE_PASS_ORIGINAL_V6_BINARY_SHA256'
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Probe actual Electron CDP route groups without page content
+        run: |
+          $ErrorActionPreference='Continue'
+          $PSNativeCommandUseErrorActionPreference=$false
+          $probe=Join-Path $env:RUNNER_TEMP 'portable-v6-route-only.mjs'
+          @'
+          import {spawn,execFileSync} from 'node:child_process';
+          const exe=process.argv[2],base='http://127.0.0.1:3210',port=9571;
+          const flags={ready:false,bankDisabled:false,cdpTarget:false,navigationCommandSuccess:false,httpIntegrationsStatus:0,windowsProcessAlive:false,postNavTargetCount:0,postNavLocalTargetCount:0,initialGroup:'NONE',postGroups:[]};
+          const wait=ms=>new Promise(r=>setTimeout(r,ms));
+          function group(uri){try{const u=new URL(uri);if(u.origin!==base)return 'NON_LOCAL';if(u.pathname==='/')return 'ROOT';if(u.pathname.startsWith('/login'))return 'LOGIN';if(u.pathname.startsWith('/dashboard'))return 'DASHBOARD';if(u.pathname.startsWith('/integrations'))return 'INTEGRATIONS';return 'OTHER'}catch{return 'BAD_URL'}}
+          async function targets(){try{const r=await fetch('http://127.0.0.1:'+port+'/json/list',{signal:AbortSignal.timeout(1800)});return r.ok?r.json():[]}catch{return []}}
+          async function ready(){try{const r=await fetch(base+'/api/ready',{signal:AbortSignal.timeout(1600)});return r.ok?r.json():null}catch{return null}}
+          let app,ws;
+          try{
+           app=spawn(exe,['--remote-debugging-port='+port,'--remote-allow-origins=*'],{stdio:'ignore',windowsHide:false,env:{...process.env,BANK_ADAPTER_MODE:'disabled',TREASURYFLOW_DESKTOP_LOCAL:'1',TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ:'0',TREASURYFLOW_ENABLE_SQL_LAB:'0'}});
+           let y;for(let i=0;i<75;i++){y=await ready();if(y?.status==='ready')break;await wait(600)}
+           flags.ready=y?.status==='ready';flags.bankDisabled=y?.bankAdapter==='disabled';
+           let list=[];for(let i=0;i<60;i++){list=await targets();if(list.some(x=>x.type==='page'&&x.webSocketDebuggerUrl))break;await wait(500)}
+           const target=list.find(x=>x.type==='page'&&x.webSocketDebuggerUrl);
+           flags.cdpTarget=!!target;flags.initialGroup=group(target?.url);
+           if(target){
+            ws=new WebSocket(target.webSocketDebuggerUrl);
+            await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('WS_CONNECT_TIMEOUT')),8000);ws.addEventListener('open',()=>{clearTimeout(timeout);resolve()},{once:true});ws.addEventListener('error',()=>{clearTimeout(timeout);reject(Error('WS_CONNECT_FAILED'))},{once:true})});
+            const response=new Promise(resolve=>{const timeout=setTimeout(()=>resolve(null),12000);ws.addEventListener('message',evt=>{try{const x=JSON.parse(evt.data);if(x.id===42){clearTimeout(timeout);resolve(x)}}catch{}})});
+            ws.send(JSON.stringify({id:42,method:'Page.navigate',params:{url:base+'/integrations'}}));
+            const result=await response;flags.navigationCommandSuccess=!!result&&!result.error&&!result.result?.errorText;
+            await wait(4000);
+           }
+           const http=await fetch(base+'/integrations',{signal:AbortSignal.timeout(6000)}).catch(()=>null);
+           flags.httpIntegrationsStatus=http?.status||0;
+           const post=await targets();
+           flags.postNavTargetCount=post.length;
+           flags.postNavLocalTargetCount=post.filter(x=>group(x.url)!=='NON_LOCAL'&&group(x.url)!=='BAD_URL').length;
+           flags.postGroups=[...new Set(post.filter(x=>x.type==='page').map(x=>group(x.url)))].sort();
+           flags.windowsProcessAlive=app.exitCode===null;
+          }catch(e){flags.errorClass=String(e.message||e).replace(/[^A-Za-z0-9_]/g,'_').slice(0,60)}
+          finally{try{ws?.close()}catch{}if(app?.pid){try{execFileSync('taskkill.exe',['/PID',String(app.pid),'/T','/F'],{stdio:'ignore',timeout:15000})}catch{}}}
+          for(const [k,v] of Object.entries(flags))console.log('ROUTE_'+k+'='+JSON.stringify(v));
+          if(!(flags.ready&&flags.bankDisabled&&flags.cdpTarget))process.exitCode=1;
+          '@ | Set-Content -LiteralPath $probe -Encoding utf8
+          node $probe $env:TF_ORIGINAL_EXE
+          if($LASTEXITCODE -ne 0){throw 'ORIGINAL_V6_NATIVE_ROUTE_PROBE_FAILED'}
+          Write-Host 'GATE_PASS_ORIGINAL_V6_CDP_LAUNCH_AND_BANK_DISABLED'
+      - name: Scope and data protection
+        if: always()
+        run: |
+          Write-Host 'ORIGINAL_V6_PROBE=ROUTE_CLASSIFICATION_ONLY; REAL_SQL=NOT_TESTED; GUI_ACCEPTANCE=NOT_TESTED; V7=NOT_TESTED'
+          Write-Host 'PRIVATE_BINARY_AND_SOURCE_NOT_UPLOADED'
