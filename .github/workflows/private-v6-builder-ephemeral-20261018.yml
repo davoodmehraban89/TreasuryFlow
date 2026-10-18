@@ -65,6 +65,30 @@ jobs:
                 WINDOWS_PATH_LENGTH='(?i)path too long|filename too long'
                 UNKNOWN_BUILDER_ERROR='(?i)error|failed|⨯'
               }
+              $specificClasses=[ordered]@{
+                ASAR_ENTRY_MISSING='(?i)(?:Application entry file|main entry file|entry file.*does not exist)'
+                ELECTRON_MAIN_MISSING='(?i)(?:main\.cjs.*not found|main\.js.*not found|entrypoint.*missing)'
+                ELECTRON_APP_PACKAGE='(?i)(?:app\.asar.*does not exist|no app\.asar|invalid app package)'
+                FILE_ALREADY_EXISTS='(?i)(?:file already exists|EEXIST)'
+                PATH_IS_TOO_LONG='(?i)(?:ENAMETOOLONG|path too long|filename or extension is too long)'
+                UNRESOLVED_DEPENDENCY='(?i)(?:unresolved dependenc|missing dependenc|cannot resolve)'
+                APP_BUILDER_EXIT='(?i)(?:exit status [0-9]+|exit code [0-9]+|errorOut=)'
+                CODE_SIGN_FAILURE='(?i)(?:failed to sign|signing failed|signtool.*error)'
+                NSIS_MAKENSIS_FAILURE='(?i)(?:makensis.*failed|NSIS Error|failed to compile script)'
+                INTEGRITY_FAILURE='(?i)(?:integrity checksum failed|incorrect integrity|checksum mismatch)'
+                ZIP_FAILURE='(?i)(?:7zip.*error|failed to extract|archive corrupted)'
+                RUNNER_RESOURCE_FAILURE='(?i)(?:out of memory|ENOMEM|disk full|ENOSPC)'
+                WINDOWS_PROCESS_FAILURE='(?i)(?:spawn.*fail|The system cannot find|CreateProcess)'
+                PACKAGING_REBUILD_FAILURE='(?i)(?:failed to rebuild|rebuilding native|node-gyp failed)'
+                AFTER_PACK_HOOK_FAILURE='(?i)(?:afterPack.*fail|afterSign.*fail)'
+                PUBLISH_FAILURE='(?i)(?:publish.*fail|upload.*fail)'
+              }
+              foreach($name in $specificClasses.Keys){
+                Write-Host ('PRIVATE_QA_NSIS_SPECIFIC_'+$name+'='+[bool]($nsisText -match $specificClasses[$name]))
+              }
+              $shortCodes=[regex]::Matches($nsisText,'\\b(?:ERR_[A-Z0-9_]{4,64}|E(?:ACCES|PERM|NOENT|EXIST|CONNRESET|TIMEDOUT|NOTFOUND|NOSPC|NAMETOOLONG|PROTO|AI_AGAIN))\\b')
+              $codes=@($shortCodes | ForEach-Object {$_.Value} | Select-Object -Unique | Select-Object -First 8)
+              if($codes.Count -gt 0){Write-Host ('PRIVATE_QA_NSIS_SAFE_ERROR_CODES='+($codes -join ','))}
               foreach($name in $knownClasses.Keys){
                 Write-Host ('PRIVATE_QA_NSIS_DIAGNOSTIC_'+$name+'='+[bool]($nsisText -match $knownClasses[$name]))
               }
