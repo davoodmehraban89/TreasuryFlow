@@ -30,7 +30,10 @@ jobs:
           $paths=@('qa/scripts/rebuild-v6-private-nonfinal-qa.ps1',
                    'qa/patches/v6-sql-assertion-fix.mjs',
                    'qa/patches/v6-add-readonly-sqlserver-adapter.mjs',
-                   'qa/windows/v6-installed-native-gui-os-clipboard.mjs')
+                   'qa/windows/v6-installed-native-gui-os-clipboard.mjs',
+                   'qa/windows/v6-full-installed-gui-and-persistence.mjs',
+                   'qa/windows/gui-readiness.mjs',
+                   'qa/windows/synthetic-iban.mjs')
           foreach($path in $paths){
             $url="https://api.github.com/repos/$private/contents/${path}?ref=$branch"
             $api=Invoke-RestMethod -Uri $url -Headers @{ Authorization="Bearer $env:TF_VALIDATION_READ_TOKEN"; Accept='application/vnd.github+json'; 'User-Agent'='TreasuryFlow-private-qa' }
@@ -146,6 +149,25 @@ jobs:
           if($guiRecord.status -ne 'PASS' -or !$guiRecord.osClipboard -or !$guiRecord.bankDisabled -or
              !$guiRecord.copyButton -or !$guiRecord.writable -or !$guiRecord.select){throw 'V6_SAME_ARTIFACT_GUI_REPORT_FAIL'}
           Write-Host 'GATE_PASS_SAME_ARTIFACT_INSTALLED_WINDOWS_OS_CLIPBOARD'
+          # Independently exercise real installed Electron 10-route navigation,
+          # three synthetic actions, restart persistence and audit on same EXE.
+          & node --check (Join-Path $work $paths[4])
+          if($LASTEXITCODE -ne 0){throw 'INSTALLED_10_ROUTE_HARNESS_SYNTAX_FAILED'}
+          $uat=Join-Path $env:RUNNER_TEMP 'v6-full-native-uat'
+          New-Item -ItemType Directory -Path $uat -Force | Out-Null
+          & node (Join-Path $work $paths[4]) $installed[0].FullName $uat *> (Join-Path $work 'private-native-10route-uat.log')
+          $uatReportFile=Join-Path $uat 'treasuryflow-native-gui.json'
+          if(!(Test-Path -LiteralPath $uatReportFile)){throw 'INSTALLED_10_ROUTE_UAT_REPORT_MISSING'}
+          $uatReport=Get-Content -LiteralPath $uatReportFile -Raw | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0 -or $uatReport.outcome -ne 'REAL_INSTALLED_ELECTRON_GUI_PASS' -or
+             $uatReport.visitedRoutes.Count -ne 10 -or !$uatReport.syntheticAccount -or
+             !$uatReport.syntheticBeneficiary -or !$uatReport.syntheticDraft -or
+             !$uatReport.durableData -or !$uatReport.auditPersisted -or !$uatReport.appReopened){
+            $safeStage=[string]$uatReport.stage -replace '[^a-zA-Z0-9_-]',''
+            throw ('V6_SAME_ARTIFACT_NATIVE_UAT_FAILED_AT_'+$safeStage)
+          }
+          Write-Host 'GATE_PASS_SAME_ARTIFACT_INSTALLED_10_ROUTES_3_SYNTHETIC_ACTIONS_RESTART_AUDIT'
+
           $uninstall=@(Get-ChildItem -LiteralPath $installDir -Recurse -File -ErrorAction SilentlyContinue |
             Where-Object {$_.Name -match '^uninstall.*[.]exe$'})
           if($uninstall.Count -ne 1){throw 'V6_NSIS_UNINSTALLER_NOT_FOUND'}
