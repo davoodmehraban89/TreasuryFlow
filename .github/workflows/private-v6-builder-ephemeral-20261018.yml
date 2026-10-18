@@ -50,6 +50,25 @@ jobs:
           & pwsh -NoProfile -File (Join-Path $work $paths[0]) -SourceArchive $archive -OutputRoot $destination *> $privateLog
           if($LASTEXITCODE -ne 0) {
             $known='ORIGINAL_PRIVATE_SOURCE_HASH_MISMATCH|UNSAFE_ZIP_ENTRY_PATH|ARCHIVE_ENTRY_COUNT_LIMIT|ZIP_UNCOMPRESSED_SIZE_LIMIT|ZIP_SYMLINK_DISALLOWED|DUPLICATE_ZIP_ENTRY|EXTRACTED_REPARSE_POINT_DISALLOWED|OFFICIAL_XLSX_PACKAGE_LOCK_INTEGRITY_NOT_PINNED_TO_VERIFIED_ARCHIVE|SHEETJS_OFFICIAL_VENDOR_SHA256_MISMATCH|INITIAL_NPM_CI_FAILED|REMOVE_VULNERABLE_XLSX_FAILED|INSTALL_PINNED_OFFICIAL_XLSX_FAILED|PATCHED_LOCK_NPM_CI_FAILED|KNOWN_PRODUCTION_DEPENDENCY_ADVISORIES_REMAIN|V6_UNIT_REGRESSION_FAILED|V6_GATE_FAILED_[A-Z]+|V6_NSIS_BUILDER_FAILED|READ_ONLY_SQL_ADAPTER_PATCH_FAILED|SQL_EDITOR_TEST_PATCH_FAILED'
+            $nsisLog=Join-Path $destination 'private-local-logs/private-nsis.log'
+            if(Test-Path -LiteralPath $nsisLog){
+              $nsisText=Get-Content -LiteralPath $nsisLog -Raw
+              $knownClasses=[ordered]@{
+                NSIS_PROCESS='(?i)makensis|nsis'
+                NETWORK='(?i)ETIMEDOUT|ECONNRESET|socket hang up|download failed'
+                FILE_PATH='(?i)ENOENT|not found|cannot find module'
+                SIGNING='(?i)signing|certificate|winCodeSign'
+                ACCESS='(?i)EPERM|EACCES|access denied'
+                NATIVE_DEPENDENCY='(?i)node-gyp|npmRebuild|native dependency'
+                CONFIGURATION='(?i)configuration|invalid config|schema'
+                ASAR='(?i)asar|cannot pack'
+                WINDOWS_PATH_LENGTH='(?i)path too long|filename too long'
+                UNKNOWN_BUILDER_ERROR='(?i)error|failed|⨯'
+              }
+              foreach($name in $knownClasses.Keys){
+                Write-Host ('PRIVATE_QA_NSIS_DIAGNOSTIC_'+$name+'='+[bool]($nsisText -match $knownClasses[$name]))
+              }
+            }
             $record=Get-Content $privateLog -Raw
             $phases=[regex]::Matches($record,'PRIVATE_QA_PHASE=[A-Z_]+')
             $lastPhase=if($phases.Count -gt 0){$phases[$phases.Count-1].Value}else{'PRIVATE_QA_PHASE=BEFORE_ARCHIVE_PREFLIGHT'}
