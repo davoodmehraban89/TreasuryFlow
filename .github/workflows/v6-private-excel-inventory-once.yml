@@ -48,7 +48,7 @@ jobs:
           const subject=files.filter(f=>/excel|xlsx|spreadsheet|workbook|csv/i.test(f.text));
           const test=files.filter(f=>/[.](test|spec)[.]/.test(f.name));
           const excelTests=test.filter(f=>/excel|xlsx|spreadsheet|workbook/i.test(f.text));
-          const excelParserDeps=Object.entries({...packageJson.dependencies,...packageJson.devDependencies}).filter(([k])=>/^(xlsx|exceljs|read-excel-file|sheetjs|@e965/xlsx)$/.test(k));
+          const excelParserDeps=Object.entries({...packageJson.dependencies,...packageJson.devDependencies}).filter(([k])=>['xlsx','exceljs','read-excel-file','sheetjs'].includes(k));
           const features={
             EXCEL_PARSER_DEPENDENCY:excelParserDeps.length>0,
             EXCEL_SOURCE_REFERENCE:subject.some(f=>/excel|xlsx|spreadsheet|workbook/i.test(f.text)),
