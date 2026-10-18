@@ -1,0 +1,145 @@
+name: V6 installed financial GUI persistence smoke on Windows 2022 (NOT V7)
+on:
+  push:
+    branches: ['ci/public-windows-bridge-probe-20261017']
+    paths: ['.github/workflows/v6-installed-financial-persistence-once.yml']
+permissions:
+  contents: read
+concurrency:
+  group: treasuryflow-v6-financial-gui-one-shot
+  cancel-in-progress: false
+jobs:
+  financial-gui:
+    runs-on: windows-2022
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ: '0'
+      TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ: '0'
+      TREASURYFLOW_ENABLE_SQL_LAB: '0'
+      TREASURYFLOW_DESKTOP_LOCAL: '1'
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Get public standalone acceptance harness (no secrets)
+        uses: actions/checkout@v4
+        with:
+          ref: ci/windows-dual-app-lab-20261016
+          path: public-harness
+          persist-credentials: false
+      - name: Download SHA-pinned private ZIP and private guarded patch
+        env:
+          GH_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:GH_TOKEN)){throw 'MISSING_READ_ONLY_TOKEN'}
+          $zip=Join-Path $env:RUNNER_TEMP 'TreasuryFlow_Validation_Staging_20261017.zip'
+          $stage=Join-Path $env:RUNNER_TEMP 'tf-v6-private'
+          gh release download validation-inputs-20261017 --repo davoodmehraban89/TreasuryFlow-Validation-Private --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir $env:RUNNER_TEMP 1>$null 2>$null
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_DOWNLOAD_FAILED'}
+          if((Get-FileHash $zip -Algorithm SHA256).Hash -ine '9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f'){throw 'PRIVATE_ZIP_SHA_FAILED'}
+          Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
+          $raw=gh api 'repos/davoodmehraban89/TreasuryFlow-Validation-Private/contents/qa/patches/v6-sql-assertion-fix.mjs?ref=2265e7e370d254eaa09988164559b2cd0c10c0d7' 2>$null | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0 -or !$raw.content){throw 'PRIVATE_PATCH_NOT_AVAILABLE'}
+          $patch=Join-Path $env:RUNNER_TEMP 'tf-sql-assertion-patch.mjs'
+          [IO.File]::WriteAllBytes($patch,[Convert]::FromBase64String(($raw.content -replace '\s','')))
+          "TF_STAGE=$stage" >> $env:GITHUB_ENV
+          "TF_PATCH=$patch" >> $env:GITHUB_ENV
+          Write-Host 'GATE_PASS_PRIVATE_SOURCE_SHA_AND_PATCH'
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build V6 installer from private staging with reproducible gated patch
+        run: |
+          $ErrorActionPreference='Continue'
+          $PSNativeCommandUseErrorActionPreference=$false
+          Set-Location $env:TF_STAGE
+          node $env:TF_PATCH $env:TF_STAGE *> (Join-Path $env:RUNNER_TEMP 'private-patch.log')
+          if($LASTEXITCODE -ne 0){throw 'PATCH_FAILED'}
+          npm ci --no-audit --no-fund *> (Join-Path $env:RUNNER_TEMP 'private-npm.log')
+          if($LASTEXITCODE -ne 0){throw 'NPM_CI_FAILED'}
+          npm test -- --reporter=dot *> (Join-Path $env:RUNNER_TEMP 'private-unit.log')
+          if($LASTEXITCODE -ne 0){throw 'UNIT_GATES_FAILED'}
+          npm run build *> (Join-Path $env:RUNNER_TEMP 'private-next.log')
+          if($LASTEXITCODE -ne 0){throw 'NEXT_BUILD_FAILED'}
+          node scripts/prepare-standalone.mjs *> (Join-Path $env:RUNNER_TEMP 'private-bundle.log')
+          if($LASTEXITCODE -ne 0){throw 'STANDALONE_FAILED'}
+          & npx --no-install electron-builder --win nsis --x64 --publish never *> (Join-Path $env:RUNNER_TEMP 'private-nsis.log')
+          if($LASTEXITCODE -ne 0){throw 'NSIS_BUILD_FAILED'}
+          $exe=@(Get-ChildItem (Join-Path $env:TF_STAGE 'release') -File -Filter 'TreasuryFlow*.exe' -ErrorAction SilentlyContinue | Where-Object {$_.Length -gt 1000000})
+          if($exe.Count -ne 1){throw 'PRIVATE_INSTALLER_NOT_UNIQUE'}
+          "TF_SETUP=$($exe[0].FullName)" >> $env:GITHUB_ENV
+          Write-Host ('REBUILT_NSIS_SHA256='+((Get-FileHash $exe[0].FullName -Algorithm SHA256).Hash))
+          Write-Host 'GATE_PASS_REBUILT_V6_NSIS'
+      - name: Install the rebuilt NSIS on disposable Windows VM
+        id: install
+        run: |
+          $ErrorActionPreference='Stop'
+          $destination=Join-Path $env:RUNNER_TEMP 'tf-v6-financial-installed'
+          $p=Start-Process -FilePath $env:TF_SETUP -ArgumentList @('/S',('/D='+$destination)) -PassThru
+          if(!$p.WaitForExit(240000)){try{$p.Kill()}catch{};throw 'INSTALL_TIMEOUT'}
+          if($p.ExitCode -ne 0){throw 'INSTALL_NONZERO'}
+          $apps=@(Get-ChildItem $destination -Recurse -File -Filter 'TreasuryFlow.exe' -ErrorAction SilentlyContinue)
+          if($apps.Count -ne 1){throw 'INSTALLED_EXE_NOT_UNIQUE'}
+          "TF_INSTALLED_EXE=$($apps[0].FullName)" >> $env:GITHUB_ENV
+          "TF_INSTALLED_ROOT=$destination" >> $env:GITHUB_ENV
+          Write-Host 'GATE_PASS_NSIS_INSTALLED'
+      - name: Real installed Electron full route synthetic financial writes and restart persistence
+        timeout-minutes: 16
+        run: |
+          $ErrorActionPreference='Continue'
+          $PSNativeCommandUseErrorActionPreference=$false
+          $src=Join-Path $env:GITHUB_WORKSPACE 'public-harness/qa/windows/electron-native-gui-smoke.mjs'
+          $probe=Join-Path $env:RUNNER_TEMP 'public-financial-smoke-temporary.mjs'
+          $script=Get-Content -LiteralPath $src -Raw
+          $marker=" await go('/login','ورود به محیط محلی امن');"
+          if(!$script.Contains($marker)){throw 'PUBLIC_HARNESS_STARTUP_ANCHOR_MISSING'}
+          $script=$script.Replace($marker, " await sleep(12000);`n"+$marker)
+          Set-Content -LiteralPath $probe -Encoding utf8 -Value $script
+          $helpers=Join-Path $env:RUNNER_TEMP 'qa-windows-helpers'
+          New-Item -ItemType Directory -Path $helpers -Force | Out-Null
+          Copy-Item -Path $env:GITHUB_WORKSPACE/public-harness/qa/windows/gui-readiness.mjs -Destination $helpers
+          Copy-Item -Path $env:GITHUB_WORKSPACE/public-harness/qa/windows/synthetic-iban.mjs -Destination $helpers
+          $script=(Get-Content -LiteralPath $probe -Raw).Replace("'./gui-readiness.mjs'","'./qa-windows-helpers/gui-readiness.mjs'").Replace("'./synthetic-iban.mjs'","'./qa-windows-helpers/synthetic-iban.mjs'")
+          Set-Content -LiteralPath $probe -Encoding utf8 -Value $script
+          $reports=Join-Path $env:RUNNER_TEMP 'private-financial-test'
+          New-Item -ItemType Directory -Force -Path $reports | Out-Null
+          node $probe $env:TF_INSTALLED_EXE $reports *> (Join-Path $env:RUNNER_TEMP 'private-financial-test.log')
+          $code=$LASTEXITCODE
+          $json=Join-Path $reports 'treasuryflow-native-gui.json'
+          if(!(Test-Path $json)){throw 'FINANCIAL_GUI_JSON_ABSENT'}
+          $x=Get-Content -LiteralPath $json -Raw | ConvertFrom-Json
+          $allow=@('cdp','localOrigin','integrations','queryEditor','copyQuery','copyExactlyEditedSql','syntheticAccount','syntheticBeneficiary','syntheticDraft','appReopened','durableData','auditPersisted')
+          foreach($key in $allow){Write-Host ("NATIVE_GUI_"+$key+"="+[bool]$x.$key)}
+          Write-Host ('NATIVE_GUI_ROUTE_PASS_COUNT='+@($x.visitedRoutes | Where-Object {$_.status -eq 'PASS'}).Count)
+          Write-Host ('NATIVE_GUI_RESTART_ROUTE_COUNT='+@($x.postRestartRoutes).Count)
+          $allowedOutcomes=@('REAL_INSTALLED_ELECTRON_GUI_PASS','FAILED')
+          Write-Host ('NATIVE_GUI_GATE='+ $(if($x.outcome -eq 'REAL_INSTALLED_ELECTRON_GUI_PASS'){'PASS'}else{'FAIL'}))
+          if($code -ne 0 -or $x.outcome -ne 'REAL_INSTALLED_ELECTRON_GUI_PASS'){throw 'INSTALLED_FINANCIAL_GUI_ACCEPTANCE_FAILED'}
+          Write-Host 'GATE_PASS_FINANCIAL_GUI_PERSISTENCE_AUDIT'
+      - name: Uninstall the rebuilt NSIS even when GUI testing fails
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        run: |
+          $ErrorActionPreference='Stop'
+          @(Get-Process -Name TreasuryFlow -ErrorAction SilentlyContinue) | ForEach-Object {try{Stop-Process -Id $_.Id -Force}catch{}}
+          $xs=@(Get-ChildItem $env:TF_INSTALLED_ROOT -Recurse -File -ErrorAction SilentlyContinue | Where-Object {$_.Name -match '^uninstall.*[.]exe$'})
+          if($xs.Count -ne 1){throw 'UNINSTALLER_NOT_UNIQUE'}
+          $p=Start-Process -FilePath $xs[0].FullName -ArgumentList '/S' -PassThru
+          if(!$p.WaitForExit(90000)){try{$p.Kill()}catch{};throw 'UNINSTALL_TIMEOUT'}
+          if($p.ExitCode -ne 0){throw 'UNINSTALL_NONZERO'}
+          $gone=$false
+          for($i=0;$i -lt 90;$i++){
+            if(@(Get-ChildItem $env:TF_INSTALLED_ROOT -Recurse -File -Filter TreasuryFlow.exe -ErrorAction SilentlyContinue).Count -eq 0){$gone=$true;break}
+            Start-Sleep -Seconds 1
+          }
+          if(!$gone){throw 'UNINSTALL_FILE_NOT_GONE'}
+          Write-Host 'GATE_PASS_SYNTHETIC_NSIS_UNINSTALL'
+      - name: Keep private source and evidence off public repository
+        if: always()
+        run: |
+          Write-Host 'SCOPE=PRIVATE_V6_FINANCIAL_GUI_SYNTHETIC_ONLY'
+          Write-Host 'SQL_SERVER_APPLICATION_ADAPTER=NOT_TESTED; EXCEL_IMPORT=NOT_TESTED; V7=NOT_TESTED'
+          Write-Host 'NO_PRIVATE_BINARY_SOURCE_OR_SCREENSHOT_UPLOADS'
