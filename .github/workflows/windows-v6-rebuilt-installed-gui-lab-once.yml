@@ -103,7 +103,7 @@ jobs:
           $outDir=Join-Path $env:TF_PRIVATE_STAGE 'release'
           $topLevelExe=@(Get-ChildItem -LiteralPath $outDir -File -Filter '*.exe' -ErrorAction SilentlyContinue)
           $nestedExe=@(Get-ChildItem -LiteralPath $outDir -Recurse -File -Filter '*.exe' -ErrorAction SilentlyContinue)
-          $targetConfirmed=[bool]($txt -match '(?i)target=nsis(\\s|$)')
+          $targetConfirmed=[bool]($txt -match 'target=nsis')
           Write-Host ("BUILDER_TOP_LEVEL_EXE_COUNT="+$topLevelExe.Count)
           Write-Host ("BUILDER_NESTED_EXE_COUNT="+$nestedExe.Count)
           Write-Host ("BUILDER_LOG_NSIS_TARGET_CONFIRMED="+$targetConfirmed)
