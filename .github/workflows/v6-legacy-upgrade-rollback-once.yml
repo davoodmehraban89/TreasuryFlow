@@ -1,0 +1,205 @@
+name: TreasuryFlow V6 synthetic in-place upgrade and rollback compatibility (NOT V7)
+on:
+  push:
+    branches: ['ci/public-windows-bridge-probe-20261017']
+    paths: ['.github/workflows/v6-legacy-upgrade-rollback-once.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: treasuryflow-v6-upgrade-lab-one-shot
+  cancel-in-progress: false
+jobs:
+  upgrade:
+    runs-on: windows-2022
+    timeout-minutes: 85
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ: '0'
+      TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ: '0'
+      TREASURYFLOW_ENABLE_SQL_LAB: '0'
+      TREASURYFLOW_DESKTOP_LOCAL: '1'
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Checkout public synthetic GUI harness without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ci/windows-dual-app-lab-20261016
+          path: public-harness
+          persist-credentials: false
+      - name: Download and verify old 0.1.0 installer from public immutable Actions artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $folder=Join-Path $env:RUNNER_TEMP 'public-legacy-installer'
+          New-Item -ItemType Directory -Force -Path $folder | Out-Null
+          $run=gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/38965182060" | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0 -or $run.head_sha -ne '0b8e85fb3765fce84e407e0e9c59f70ad901fd8a'){throw 'LEGACY_RUN_SHA_MISMATCH'}
+          $artifact=gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts/12075720690" | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0 -or $artifact.expired -or $artifact.digest -ne 'sha256:70fc35413677ee7a6eaa8698ddd3dfe7f828ce2a5af90a4a24a1364467d2401b'){throw 'LEGACY_ARTIFACT_HASH_OR_RETENTION_FAILED'}
+          gh run download 38965182060 --repo "$env:GITHUB_REPOSITORY" --name treasuryflow-windows-build-and-evidence --dir $folder *> (Join-Path $env:RUNNER_TEMP 'legacy-download.log')
+          if($LASTEXITCODE -ne 0){throw 'LEGACY_ARTIFACT_DOWNLOAD_FAILED'}
+          $setups=@(Get-ChildItem $folder -Recurse -File -Filter 'TreasuryFlow-Setup-0.1.0-Windows-x64.exe')
+          if($setups.Count -ne 1){throw 'LEGACY_SETUP_NOT_UNIQUE'}
+          if((Get-FileHash $setups[0].FullName -Algorithm SHA256).Hash -ine 'F4EE8F43D1CBF1181B94B525770A8101E6073486676E7AA54D075AB8CBCC2606'){throw 'LEGACY_SETUP_SHA256_MISMATCH'}
+          "TF_OLD_SETUP=$($setups[0].FullName)" >> $env:GITHUB_ENV
+          Write-Host 'GATE_PASS_PINNED_OLD_0_1_0_SETUP'
+      - name: Download private V6 stage plus strictly scoped private source test patch
+        env:
+          GH_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:GH_TOKEN)){throw 'MISSING_READ_TOKEN'}
+          $zip=Join-Path $env:RUNNER_TEMP 'TreasuryFlow_Validation_Staging_20261017.zip'
+          gh release download validation-inputs-20261017 --repo davoodmehraban89/TreasuryFlow-Validation-Private --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir $env:RUNNER_TEMP 1>$null 2>$null
+          if($LASTEXITCODE -ne 0){throw 'V6_INPUT_DOWNLOAD_FAILED'}
+          if((Get-FileHash $zip -Algorithm SHA256).Hash -ine '9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f'){throw 'V6_INPUT_HASH_MISMATCH'}
+          $stage=Join-Path $env:RUNNER_TEMP 'v6-private-rebuild'
+          Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
+          $patch=gh api 'repos/davoodmehraban89/TreasuryFlow-Validation-Private/contents/qa/patches/v6-sql-assertion-fix.mjs?ref=2265e7e370d254eaa09988164559b2cd0c10c0d7' 2>$null | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0 -or !$patch.content){throw 'V6_PATCH_MISSING'}
+          $patchPath=Join-Path $env:RUNNER_TEMP 'tf-v6-private-patch.mjs'
+          [IO.File]::WriteAllBytes($patchPath,[Convert]::FromBase64String(($patch.content -replace '\s','')))
+          "TF_V6_STAGE=$stage" >> $env:GITHUB_ENV
+          "TF_V6_PATCH=$patchPath" >> $env:GITHUB_ENV
+          Write-Host 'GATE_PASS_V6_PRIVATE_ZIP_PROVENANCE'
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build ephemeral actual V6 NSIS Setup
+        run: |
+          $ErrorActionPreference='Continue'
+          $PSNativeCommandUseErrorActionPreference=$false
+          Set-Location $env:TF_V6_STAGE
+          node $env:TF_V6_PATCH $env:TF_V6_STAGE *> (Join-Path $env:RUNNER_TEMP 'private-patch.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_TEST_PATCH_FAILED'}
+          npm ci --no-audit --no-fund *> (Join-Path $env:RUNNER_TEMP 'private-npm.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_NPM_CI_FAILED'}
+          npm test -- --reporter=dot *> (Join-Path $env:RUNNER_TEMP 'private-test.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_UNIT_TESTS_FAILED'}
+          npm run build *> (Join-Path $env:RUNNER_TEMP 'private-build.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_BUILD_FAILED'}
+          node scripts/prepare-standalone.mjs *> (Join-Path $env:RUNNER_TEMP 'private-standalone.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_STANDALONE_FAILED'}
+          & npx --no-install electron-builder --win nsis --x64 --publish never *> (Join-Path $env:RUNNER_TEMP 'private-nsis.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_NSIS_FAILED'}
+          $list=@(Get-ChildItem (Join-Path $env:TF_V6_STAGE 'release') -File -Filter 'TreasuryFlow*.exe' | Where-Object {$_.Length -gt 1000000})
+          if($list.Count -ne 1){throw 'PRIVATE_INSTALLER_NOT_UNIQUE'}
+          "TF_V6_SETUP=$($list[0].FullName)" >> $env:GITHUB_ENV
+          Write-Host 'GATE_PASS_BUILT_PRIVATE_V6_SETUP'
+      - name: Install legacy 0.1.0 and populate synthetic account, beneficiary, draft, and audit via Electron
+        id: legacy
+        timeout-minutes: 16
+        run: |
+          $ErrorActionPreference='Continue'
+          $PSNativeCommandUseErrorActionPreference=$false
+          $dir=Join-Path $env:RUNNER_TEMP 'tf-replaceable-install'
+          $p=Start-Process -FilePath $env:TF_OLD_SETUP -ArgumentList @('/S',('/D='+$dir)) -PassThru
+          if(!$p.WaitForExit(240000) -or $p.ExitCode -ne 0){throw 'LEGACY_INSTALL_FAILED'}
+          $app=@(Get-ChildItem $dir -Recurse -File -Filter TreasuryFlow.exe)
+          if($app.Count -ne 1){throw 'LEGACY_APP_NOT_UNIQUE'}
+          $h=Join-Path $env:GITHUB_WORKSPACE 'public-harness/qa/windows/electron-native-gui-smoke.mjs'
+          $probe=Join-Path $env:RUNNER_TEMP 'public-legacy-gui.mjs'
+          $content=(Get-Content $h -Raw).Replace(" await go('/login','ورود به محیط محلی امن');"," await sleep(12000);`n await go('/login','ورود به محیط محلی امن');")
+          $content=$content.Replace("'./gui-readiness.mjs'","'./tf-old-public-helpers/gui-readiness.mjs'").Replace("'./synthetic-iban.mjs'","'./tf-old-public-helpers/synthetic-iban.mjs'")
+          Set-Content $probe $content -Encoding utf8
+          $helpers=Join-Path $env:RUNNER_TEMP 'tf-old-public-helpers'
+          New-Item -Force -ItemType Directory -Path $helpers | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE/public-harness/qa/windows/gui-readiness.mjs" $helpers
+          Copy-Item "$env:GITHUB_WORKSPACE/public-harness/qa/windows/synthetic-iban.mjs" $helpers
+          $evidence=Join-Path $env:RUNNER_TEMP 'synthetic-legacy-data'
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          node $probe $app[0].FullName $evidence *> (Join-Path $env:RUNNER_TEMP 'legacy-financial-gui.log')
+          $testResult=$LASTEXITCODE
+          $resultFile=Join-Path $evidence 'treasuryflow-native-gui.json'
+          if(!(Test-Path $resultFile)){throw 'LEGACY_GUI_REPORT_ABSENT'}
+          $r=Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
+          Write-Host ("LEGACY_SYNTHETIC_DRAFT_CREATED="+[bool]$r.syntheticDraft)
+          Write-Host ("LEGACY_SYNTHETIC_DATA_PERSISTED="+[bool]$r.durableData)
+          Write-Host ("LEGACY_SYNTHETIC_AUDIT_PERSISTED="+[bool]$r.auditPersisted)
+          if($testResult -ne 0 -or $r.outcome -ne 'REAL_INSTALLED_ELECTRON_GUI_PASS'){throw 'LEGACY_SEED_ACCEPTANCE_FAILED'}
+          "TF_UPGRADE_INSTALL_DIR=$dir" >> $env:GITHUB_ENV
+          "TF_SHARED_SYNTHETIC_DB=$(Join-Path $evidence 'vm-only-treasuryflow.sqlite')" >> $env:GITHUB_ENV
+          Write-Host 'GATE_PASS_LEGACY_SYNTHETIC_BASELINE'
+      - name: Install V6 over old version and check integrity and readability of persistent synthetic data
+        id: upgrade
+        timeout-minutes: 14
+        run: |
+          $ErrorActionPreference='Stop'
+          $proc=Start-Process -FilePath $env:TF_V6_SETUP -ArgumentList @('/S',('/D='+$env:TF_UPGRADE_INSTALL_DIR)) -PassThru
+          if(!$proc.WaitForExit(240000)){try{$proc.Kill()}catch{};throw 'V6_UPGRADE_INSTALL_TIMEOUT'}
+          if($proc.ExitCode -ne 0){throw 'V6_UPGRADE_INSTALLER_EXIT_NONZERO'}
+          $app=@(Get-ChildItem $env:TF_UPGRADE_INSTALL_DIR -Recurse -File -Filter TreasuryFlow.exe)
+          if($app.Count -ne 1){throw 'UPGRADED_EXE_NOT_UNIQUE'}
+          $env:TREASURYFLOW_DATA_FILE=$env:TF_SHARED_SYNTHETIC_DB
+          $p=Start-Process -FilePath $app[0].FullName -PassThru
+          try{
+            $healthy=$false
+            for($i=0;$i -lt 90;$i++){
+              Start-Sleep -Milliseconds 500
+              try{$r=Invoke-RestMethod http://127.0.0.1:3210/api/ready -TimeoutSec 2;if($r.status -eq 'ready' -and $r.bankAdapter -eq 'disabled'){$healthy=$true;break}}catch{}
+            }
+            if(!$healthy){throw 'UPGRADED_V6_READY_FAILED'}
+            $checks=[ordered]@{accounts='VM-SYNTHETIC-SOURCE';beneficiaries='VM-SYNTHETIC-BENEFICIARY';payments='VM-DRAFT-';audit='ACCOUNT_CREATED'}
+            foreach($route in $checks.Keys){
+              $seen=$false
+              for($i=0;$i -lt 25;$i++){
+                try{$x=Invoke-WebRequest ("http://127.0.0.1:3210/"+$route) -TimeoutSec 4
+                  if($x.StatusCode -eq 200 -and $x.Content.Contains($checks[$route])){$seen=$true;break}
+                }catch{}
+                Start-Sleep -Milliseconds 700
+              }
+              Write-Host ("UPGRADED_V6_"+$route+"_PRESERVED="+$seen)
+              if(!$seen){throw ('V6_UPGRADE_SYNTHETIC_DATA_NOT_PRESERVED_'+$route)}
+            }
+            Write-Host 'GATE_PASS_V6_0_1_0_UPGRADE_PERSISTENCE'
+          }finally{try{taskkill.exe /T /F /PID $p.Id *> $null}catch{}}
+      - name: Roll back old verified setup on disposable test data and check synthetic data compatibility
+        id: rollback
+        timeout-minutes: 14
+        run: |
+          $ErrorActionPreference='Stop'
+          $proc=Start-Process -FilePath $env:TF_OLD_SETUP -ArgumentList @('/S',('/D='+$env:TF_UPGRADE_INSTALL_DIR)) -PassThru
+          if(!$proc.WaitForExit(240000)){try{$proc.Kill()}catch{};throw 'ROLLBACK_INSTALL_TIMEOUT'}
+          if($proc.ExitCode -ne 0){throw 'ROLLBACK_INSTALL_NONZERO'}
+          $app=@(Get-ChildItem $env:TF_UPGRADE_INSTALL_DIR -Recurse -File -Filter TreasuryFlow.exe)
+          if($app.Count -ne 1){throw 'ROLLED_BACK_EXE_NOT_UNIQUE'}
+          $env:TREASURYFLOW_DATA_FILE=$env:TF_SHARED_SYNTHETIC_DB
+          $p=Start-Process -FilePath $app[0].FullName -PassThru
+          try{
+            $healthy=$false
+            for($i=0;$i -lt 90;$i++){
+              Start-Sleep -Milliseconds 500
+              try{$r=Invoke-RestMethod http://127.0.0.1:3210/api/ready -TimeoutSec 2;if($r.status -eq 'ready' -and $r.bankAdapter -eq 'disabled'){$healthy=$true;break}}catch{}
+            }
+            if(!$healthy){throw 'ROLLED_BACK_APP_NOT_READY'}
+            $page=Invoke-WebRequest http://127.0.0.1:3210/accounts -TimeoutSec 10
+            $ok=($page.StatusCode -eq 200 -and $page.Content.Contains('VM-SYNTHETIC-SOURCE'))
+            Write-Host ('ROLLBACK_ACCOUNT_PRESERVED='+$ok)
+            if(!$ok){throw 'ROLLBACK_SYNTHETIC_ACCOUNT_NOT_PRESERVED'}
+            Write-Host 'GATE_PASS_0_1_0_TEST_ROLLBACK'
+          }finally{try{taskkill.exe /T /F /PID $p.Id *> $null}catch{}}
+      - name: Uninstall test installation even after failed upgrade or rollback
+        if: ${{ always() && steps.legacy.outcome == 'success' }}
+        run: |
+          $ErrorActionPreference='Stop'
+          @(Get-Process TreasuryFlow -ErrorAction SilentlyContinue) | ForEach-Object {try{Stop-Process -Id $_.Id -Force}catch{}}
+          $xs=@(Get-ChildItem $env:TF_UPGRADE_INSTALL_DIR -Recurse -File -ErrorAction SilentlyContinue | Where-Object {$_.Name -match '^uninstall.*[.]exe$'})
+          if($xs.Count -ne 1){throw 'CURRENT_UNINSTALLER_NOT_UNIQUE'}
+          $p=Start-Process -FilePath $xs[0].FullName -ArgumentList '/S' -PassThru
+          if(!$p.WaitForExit(90000) -or $p.ExitCode -ne 0){throw 'CLEANUP_UNINSTALL_FAILED'}
+          $removed=$false
+          for($i=0;$i -lt 90;$i++){if(@(Get-ChildItem $env:TF_UPGRADE_INSTALL_DIR -Recurse -File -Filter TreasuryFlow.exe -ErrorAction SilentlyContinue).Count -eq 0){$removed=$true;break};Start-Sleep -Seconds 1}
+          if(!$removed){throw 'CLEANUP_EXE_NOT_REMOVED'}
+          Write-Host 'GATE_PASS_TEST_INSTALL_UNINSTALL_AFTER_UPGRADE'
+      - name: Disclose bounded scope
+        if: always()
+        run: |
+          Write-Host 'SCOPE=DISPOSABLE_SYNTHETIC_0_1_0_TO_1_0_1_UPGRADE_AND_ROLLBACK'
+          Write-Host 'V7_NOT_TESTED; REAL_SQL_NOT_CONNECTED; BANK_DISABLED; MAYAN_EXTERNAL_READ_DISABLED'
+          Write-Host 'NO_PRIVATE_CODE_BINARY_FIXTURES_OR_LOGS_UPLOADED'
