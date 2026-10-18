@@ -1,0 +1,99 @@
+name: V6 targeted Excel import/export unit and production dependency audit (NOT V7)
+on:
+  push:
+    branches: ['ci/public-windows-bridge-probe-20261017']
+    paths: ['.github/workflows/v6-excel-targeted-unit-audit-once.yml']
+permissions:
+  contents: read
+jobs:
+  excel-and-security:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ: '0'
+      TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ: '0'
+      TREASURYFLOW_ENABLE_SQL_LAB: '0'
+    steps:
+      - name: Retrieve and verify immutable private source with read-only token
+        env:
+          GH_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          gh release download validation-inputs-20261017 --repo davoodmehraban89/TreasuryFlow-Validation-Private --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir "$RUNNER_TEMP" >/dev/null 2>&1
+          f="$RUNNER_TEMP/TreasuryFlow_Validation_Staging_20261017.zip"
+          test "$(sha256sum "$f" | cut -d' ' -f1)" = 9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f
+          mkdir -p "$RUNNER_TEMP/private-stage"
+          unzip -q "$f" -d "$RUNNER_TEMP/private-stage"
+          echo "TF_ROOT=$RUNNER_TEMP/private-stage" >> "$GITHUB_ENV"
+          echo 'GATE_PASS_PRIVATE_STAGING_SHA256'
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run only Excel-related existing test suites with private output redacted
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$TF_ROOT"
+          npm ci --no-audit --no-fund > "$RUNNER_TEMP/private-npm-ci.log" 2>&1 || { echo 'PRIVATE_NPM_CI_FAILED'; exit 1; }
+          cat > "$RUNNER_TEMP/private-excel-suite-runner.mjs" <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import {spawnSync} from 'node:child_process';
+          const root=process.env.TF_ROOT;
+          const tests=[];
+          function scan(dir){
+            if(!fs.existsSync(dir))return;
+            for(const ent of fs.readdirSync(dir,{withFileTypes:true})){
+              if(['node_modules','.next','.git','release'].includes(ent.name))continue;
+              const p=path.join(dir,ent.name);
+              if(ent.isDirectory())scan(p);
+              else if(/[.](?:test|spec)[.][cm]?[jt]sx?$/.test(ent.name)&&fs.statSync(p).size<100000){
+                const str=fs.readFileSync(p,'utf8');
+                if(/xlsx|excel|spreadsheet|workbook/i.test(str))tests.push(p);
+              }
+            }
+          }
+          scan(path.join(root,'src'));scan(path.join(root,'qa'));
+          console.log('EXCEL_RELATED_TEST_FILE_COUNT='+tests.length);
+          if(tests.length<1)process.exit(11);
+          const report=path.join(process.env.RUNNER_TEMP,'private-targeted-excel.json');
+          const args=['vitest','run',...tests,'--reporter=json','--outputFile='+report];
+          const child=spawnSync(path.join(root,'node_modules','.bin','vitest'),args.slice(2),{cwd:root,env:process.env,encoding:'utf8',timeout:180000});
+          if(!fs.existsSync(report)){console.log('EXCEL_TEST_REPORT_MISSING=true');process.exit(12)}
+          const data=JSON.parse(fs.readFileSync(report,'utf8'));
+          console.log('EXCEL_TEST_TOTAL='+Number(data.numTotalTests||0));
+          console.log('EXCEL_TEST_PASS='+Number(data.numPassedTests||0));
+          console.log('EXCEL_TEST_FAIL='+Number(data.numFailedTests||0));
+          console.log('EXCEL_TEST_PENDING='+Number(data.numPendingTests||0));
+          if(child.status!==0||Number(data.numFailedTests||0)!==0)process.exit(13);
+          console.log('GATE_PASS_EXCEL_RELATED_TEST_SUITES');
+          NODE
+          node "$RUNNER_TEMP/private-excel-suite-runner.mjs"
+      - name: Run bounded production dependency vulnerability audit
+        shell: bash
+        run: |
+          cd "$TF_ROOT"
+          set +e
+          npm audit --omit=dev --json > "$RUNNER_TEMP/private-production-audit.json" 2> "$RUNNER_TEMP/private-audit-stderr.log"
+          auditCode=$?
+          set -e
+          AUDIT_CODE="$auditCode" node -e '
+            const fs=require("fs");
+            let x;
+            try { x=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/private-production-audit.json","utf8")); }
+            catch { console.log("PRODUCTION_AUDIT_PARSEABLE=false"); process.exit(2); }
+            if(!x.metadata?.vulnerabilities){console.log("PRODUCTION_AUDIT_HAS_COUNTS=false");process.exit(3)}
+            const v=x.metadata.vulnerabilities;
+            for(const k of ["critical","high","moderate","low","total"])console.log("PRODUCTION_AUDIT_"+k.toUpperCase()+"="+Number(v[k]||0));
+            if(Number(v.critical||0)>0||Number(v.high||0)>0){console.log("PRODUCTION_DEPENDENCY_HIGH_OR_CRITICAL_BLOCKER=true");process.exit(4)}
+            console.log("GATE_PASS_NO_PRODUCTION_HIGH_OR_CRITICAL_VULNS");
+          '
+      - name: Strict scope summary
+        if: always()
+        run: |
+          echo 'TEST_DATA=EXISTING_PRIVATE_UNIT_FIXTURES; EXCEL_GUI=NOT_TESTED; SOURCE_AND_RAW_LOGS=NOT_UPLOADED'
+          echo 'V7_FINAL=NOT_TESTED; SQL_SERVER_ADAPTER=NOT_TESTED; BANK_DISABLED=true'
