@@ -166,6 +166,11 @@ jobs:
            const pages=async()=>{const r=await fetch('http://127.0.0.1:'+port+'/json/list',{signal:AbortSignal.timeout(1500)});return r.ok?r.json():[]};
            const first=await wait(async()=>{const x=await pages();return x.find(y=>y.type==='page'&&y.url?.startsWith(base)&&y.webSocketDebuggerUrl)});
            conn=await wsConnect(first.webSocketDebuggerUrl);
+           report.stage='GUI_STARTUP_SETTLING';
+           await sleep(12000);
+           const idleReady=await fetch(base+'/api/ready',{signal:AbortSignal.timeout(1800)}).then(x=>x.json()).catch(()=>null);
+           assert(electronProcess.exitCode===null&&idleReady?.status==='ready'&&idleReady?.bankAdapter==='disabled','ELECTRON_NOT_STABLE_AFTER_12_SECONDS');
+           report.idleStable=true;
            report.stage='LOCAL_ENTRY';
            const initial=await conn.evalJs("({path:location.pathname,entry:[...document.querySelectorAll('a[href]')].some(a=>a.getAttribute('href')==='/dashboard')})").catch(()=>null);
            report.entryInitialLogin=initial?.path==='/login';
@@ -180,7 +185,6 @@ jobs:
            const navResult=await conn.call('Page.navigate',{url:base+'/integrations'}).catch(()=>null);
            report.cdpNavigateAccepted=!!navResult&&!navResult.errorText;
            await sleep(1200);
-           await conn.evalJs("(()=>{if(location.pathname!='/integrations')location.assign('/integrations');return true})()").catch(()=>null);
            let last='';
            await wait(async()=>{
              const x=await pages();
@@ -224,7 +228,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
           node $probe $env:TF_INSTALLED_V6_EXE $reportDir *> (Join-Path $env:RUNNER_TEMP 'private-gui-output.log')
           $result=Get-Content (Join-Path $reportDir 'private-gui-report.json') -Raw | ConvertFrom-Json
-          foreach($key in @('integrations','writable','select','copyButton','osClipboard','bankDisabled','entryInitialLogin','entryLinkPresent','rootTargetSeen','loginTargetSeen','dashboardTargetSeen','integrationsTargetSeen','integrationsDomSeen','cdpNavigateAccepted')){
+          foreach($key in @('integrations','writable','select','copyButton','osClipboard','bankDisabled','entryInitialLogin','entryLinkPresent','rootTargetSeen','loginTargetSeen','dashboardTargetSeen','integrationsTargetSeen','integrationsDomSeen','cdpNavigateAccepted','idleStable')){
             Write-Host ("GUI_"+$key+"="+[bool]$result.$key)
           }
           Write-Host ("GUI_SQL_HTTP_STATUS="+[int]$result.sqlHttpStatus)
