@@ -1,4 +1,4 @@
-name: V6 regression: guard real SQL view, deny table and all SQL writes
+name: V6 SQL view guard and denied writes regression
 on:
   push:
     branches: ['ci/public-windows-bridge-probe-20261017']
