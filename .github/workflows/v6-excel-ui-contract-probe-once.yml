@@ -1,0 +1,57 @@
+name: Nonfinal V6 Excel UI integration gap probe
+on:
+  push:
+    paths:
+      - .github/workflows/v6-excel-ui-contract-probe-once.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - name: Isolated private source contract inspection
+        shell: pwsh
+        env:
+          TF_VALIDATION_READ_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:TF_VALIDATION_READ_TOKEN)){throw 'PRIVATE_SOURCE_READ_TOKEN_MISSING'}
+          $env:GH_TOKEN=$env:TF_VALIDATION_READ_TOKEN
+          $root=Join-Path $env:RUNNER_TEMP 'v6-excel-ui-synthetic-probe'
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          & gh release download validation-inputs-20261017 --repo davoodmehraban89/TreasuryFlow-Validation-Private --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir $root *> (Join-Path $root 'private-transfer.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_DOWNLOAD_FAILED'}
+          $source=Join-Path $root 'TreasuryFlow_Validation_Staging_20261017.zip'
+          if((Get-FileHash $source -Algorithm SHA256).Hash -ne '9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f'){throw 'PRIVATE_INPUT_SHA256_MISMATCH'}
+          $env:GH_TOKEN=''
+          $env:TF_VALIDATION_READ_TOKEN=''
+          $dst=Join-Path $root 'private-stage'
+          Expand-Archive -LiteralPath $source -DestinationPath $dst
+          $p=Get-Content (Join-Path $dst 'package.json') -Raw | ConvertFrom-Json
+          if($p.version -ne '1.0.1'){throw 'UNEXPECTED_PACKAGE_VERSION'}
+          $routes=Get-ChildItem -LiteralPath (Join-Path $dst 'src/app') -Recurse -File | Where-Object {$_.Name -match '^page[.][jt]sx?$'}
+          $sourceFiles=Get-ChildItem -LiteralPath (Join-Path $dst 'src') -Recurse -File | Where-Object {$_.Name -match '[.][jt]sx?$'}
+          $excelSources=@($sourceFiles | Where-Object { $_.Name -match '(?i)excel|xlsx|workbook|spreadsheet|import|export' })
+          $excelTests=@($sourceFiles | Where-Object { $_.Name -match '(?i)excel|xlsx|workbook|spreadsheet' -and $_.Name -match '[.]test[.]' })
+          $fileInputs=0
+          $excelUiMentions=0
+          $excelImportActions=0
+          foreach($route in $routes){
+            $content=Get-Content -LiteralPath $route.FullName -Raw
+            if($content -match '(?i)type\s*=\s*[\x27\x22]file[\x27\x22]|<input[^>]+type\s*=\s*[\x27\x22]file'){ $fileInputs++ }
+            if($content -match '(?i)\.xlsx|\.xls|Excel|import.*workbook|ورود فایل|بارگذاری فایل|خروجی اکسل'){ $excelUiMentions++ }
+            if($content -match '(?i)parse.*workbook|read.*spreadsheet|import.*excel'){ $excelImportActions++ }
+          }
+          $excelUnitContent=0
+          foreach($f in $excelSources) {
+            if($f.Length -gt 200) {$excelUnitContent++}
+          }
+          Write-Host 'GATE_PASS_PINNED_PRIVATE_V6_STAGING_INPUT'
+          Write-Host ('PUBLIC_SAFE_ROUTE_COUNT='+$routes.Count)
+          Write-Host ('PUBLIC_SAFE_EXCEL_RELATED_SOURCE_FILES='+$excelSources.Count)
+          Write-Host ('PUBLIC_SAFE_EXCEL_RELATED_UNIT_TEST_FILES='+$excelTests.Count)
+          Write-Host ('PUBLIC_SAFE_EXCEL_ROUTE_MENTIONS='+$excelUiMentions)
+          Write-Host ('PUBLIC_SAFE_UPLOAD_INPUT_ROUTES='+$fileInputs)
+          Write-Host ('PUBLIC_SAFE_EXCEL_ACTION_ROUTE_PATTERNS='+$excelImportActions)
+          Write-Host 'GATE_PASS_SOURCE_METADATA_ONLY_NO_PRIVATE_FILES_EMITTED'
