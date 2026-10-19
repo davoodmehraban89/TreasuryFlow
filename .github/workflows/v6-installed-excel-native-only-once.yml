@@ -232,6 +232,9 @@ jobs:
           if($LASTEXITCODE -ne 0 -or $excelReport.status -ne 'PASS_NATIVE_FILE_PICKER_ONLY' -or
              !$excelReport.fileSelected -or !$excelReport.bankDisabled -or !$excelReport.realElectron){
             $stageText=[string]$excelReport.stage -replace '[^A-Z0-9_ ]',''
+            Write-Host ('EXCEL_DISCOVERY_STATIC_PAGE_COUNT='+[int]$excelReport.staticInputPages)
+            Write-Host ('EXCEL_DISCOVERY_LOADED_ROUTE_COUNT='+[int]$excelReport.loadedRoutes)
+            Write-Host ('EXCEL_DISCOVERY_DIRECT_STATIC_ROUTE_MISSING_INPUT='+[bool]$excelReport.staticRouteRenderedWithoutInput)
             throw ('XLSX_NATIVE_GUI_NEGATIVE_FAILED_AT_'+$stageText)
           }
           Write-Host 'GATE_PASS_SAME_ARTIFACT_REAL_ELECTRON_XLSX_FILE_INPUT'
