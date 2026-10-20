@@ -1,0 +1,286 @@
+name: V6 hardened native Excel positive negative complete preview QA
+on:
+  push:
+    paths:
+      - .github/workflows/v6-excel-hardened-roundtrip-once.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  private-builder:
+    runs-on: windows-2022
+    timeout-minutes: 70
+    steps:
+      - name: Install Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify private V6 builder from validated short staging path, no uploads
+        shell: pwsh
+        env:
+          TF_VALIDATION_READ_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrWhiteSpace($env:TF_VALIDATION_READ_TOKEN)){throw 'PRIVATE_READ_TOKEN_NOT_AVAILABLE'}
+          $env:GH_TOKEN=$env:TF_VALIDATION_READ_TOKEN
+          $private='davoodmehraban89/TreasuryFlow-Validation-Private'
+          $branch='f02aa998f7a81c68d5a317f15a671b15eef9620f'
+          $work=Join-Path $env:RUNNER_TEMP 'v6-protected-builder'
+          New-Item -ItemType Directory -Path $work -Force | Out-Null
+          $paths=@('qa/scripts/rebuild-v6-private-nonfinal-qa.ps1',
+                   'qa/patches/v6-sql-assertion-fix.mjs',
+                   'qa/patches/v6-add-readonly-sqlserver-adapter.mjs',
+                   'qa/windows/v6-installed-native-gui-os-clipboard.mjs',
+                   'qa/windows/v6-full-installed-gui-and-persistence.mjs',
+                   'qa/windows/gui-readiness.mjs',
+                   'qa/windows/synthetic-iban.mjs',
+                   'qa/windows/v6-installed-excel-ui-negative-gate.mjs',
+                   'qa/patches/v6-add-excel-isolated-preview.mjs',
+                   'qa/tests/v6-excel-preview-validators.test.mjs',
+                   'qa/windows/v6-native-excel-clipboard-acceptance.fragment.txt',
+                   'qa/tests/v6-excel-security-and-fuzz.test.mjs')
+          foreach($path in $paths){
+            $url="https://api.github.com/repos/$private/contents/${path}?ref=$branch"
+            $api=Invoke-RestMethod -Uri $url -Headers @{ Authorization="Bearer $env:TF_VALIDATION_READ_TOKEN"; Accept='application/vnd.github+json'; 'User-Agent'='TreasuryFlow-private-qa' }
+            if(!$api.content -or $api.encoding -ne 'base64'){throw 'PRIVATE_TEXT_FETCH_FAILED'}
+            $dest=Join-Path $work $path
+            New-Item -ItemType Directory -Path (Split-Path $dest -Parent) -Force | Out-Null
+            [IO.File]::WriteAllBytes($dest,[Convert]::FromBase64String(($api.content -replace '\s','')))
+          }
+          $archive=Join-Path $work 'TreasuryFlow_Validation_Staging_20261017.zip'
+          & gh release download validation-inputs-20261017 --repo $private --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir $work *> (Join-Path $work 'release-fetch.log')
+          if($LASTEXITCODE -ne 0){throw 'PRIVATE_RELEASE_DOWNLOAD_FAILED'}
+          # The private read-only GitHub token is ONLY for fetching inputs.
+          # electron-builder can infer an unintended publish/update provider
+          # from GH_TOKEN after NSIS has otherwise successfully built.
+          Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:TF_VALIDATION_READ_TOKEN -ErrorAction SilentlyContinue
+          Write-Host 'GATE_PASS_PRIVATE_DOWNLOAD_TOKEN_CLEARED_BEFORE_PACKAGING'
+          $destination=Join-Path $work 'run-once-candidate'
+          $privateLog=Join-Path $work 'full-builder-log-private.txt'
+          $errors=$null
+          $tokens=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Join-Path $work $paths[0]),[ref]$tokens,[ref]$errors)
+          if($errors.Count -gt 0){throw 'PRIVATE_BUILDER_POWERSHELL_PARSE_FAILED'}
+          & pwsh -NoProfile -File (Join-Path $work $paths[0]) -SourceArchive $archive -OutputRoot $destination -EnableExcelPreview *> $privateLog
+          if($LASTEXITCODE -ne 0) {
+            $known='ORIGINAL_PRIVATE_SOURCE_HASH_MISMATCH|UNSAFE_ZIP_ENTRY_PATH|ARCHIVE_ENTRY_COUNT_LIMIT|ZIP_UNCOMPRESSED_SIZE_LIMIT|ZIP_SYMLINK_DISALLOWED|DUPLICATE_ZIP_ENTRY|EXTRACTED_REPARSE_POINT_DISALLOWED|OFFICIAL_XLSX_PACKAGE_LOCK_INTEGRITY_NOT_PINNED_TO_VERIFIED_ARCHIVE|SHEETJS_OFFICIAL_VENDOR_SHA256_MISMATCH|INITIAL_NPM_CI_FAILED|REMOVE_VULNERABLE_XLSX_FAILED|INSTALL_PINNED_OFFICIAL_XLSX_FAILED|PATCHED_LOCK_NPM_CI_FAILED|KNOWN_PRODUCTION_DEPENDENCY_ADVISORIES_REMAIN|V6_UNIT_REGRESSION_FAILED|V6_GATE_FAILED_[A-Z]+|V6_NSIS_BUILDER_FAILED|READ_ONLY_SQL_ADAPTER_PATCH_FAILED|SQL_EDITOR_TEST_PATCH_FAILED'
+            $nsisLog=Join-Path $destination 'private-local-logs/private-nsis.log'
+            if(Test-Path -LiteralPath $nsisLog){
+              $nsisText=Get-Content -LiteralPath $nsisLog -Raw
+              $knownClasses=[ordered]@{
+                NSIS_PROCESS='(?i)makensis|nsis'
+                NETWORK='(?i)ETIMEDOUT|ECONNRESET|socket hang up|download failed'
+                FILE_PATH='(?i)ENOENT|not found|cannot find module'
+                SIGNING='(?i)signing|certificate|winCodeSign'
+                ACCESS='(?i)EPERM|EACCES|access denied'
+                NATIVE_DEPENDENCY='(?i)node-gyp|npmRebuild|native dependency'
+                CONFIGURATION='(?i)configuration|invalid config|schema'
+                ASAR='(?i)asar|cannot pack'
+                WINDOWS_PATH_LENGTH='(?i)path too long|filename too long'
+                UNKNOWN_BUILDER_ERROR='(?i)error|failed|⨯'
+              }
+              $specificClasses=[ordered]@{
+                ASAR_ENTRY_MISSING='(?i)(?:Application entry file|main entry file|entry file.*does not exist)'
+                ELECTRON_MAIN_MISSING='(?i)(?:main\.cjs.*not found|main\.js.*not found|entrypoint.*missing)'
+                ELECTRON_APP_PACKAGE='(?i)(?:app\.asar.*does not exist|no app\.asar|invalid app package)'
+                FILE_ALREADY_EXISTS='(?i)(?:file already exists|EEXIST)'
+                PATH_IS_TOO_LONG='(?i)(?:ENAMETOOLONG|path too long|filename or extension is too long)'
+                UNRESOLVED_DEPENDENCY='(?i)(?:unresolved dependenc|missing dependenc|cannot resolve)'
+                APP_BUILDER_EXIT='(?i)(?:exit status [0-9]+|exit code [0-9]+|errorOut=)'
+                CODE_SIGN_FAILURE='(?i)(?:failed to sign|signing failed|signtool.*error)'
+                NSIS_MAKENSIS_FAILURE='(?i)(?:makensis.*failed|NSIS Error|failed to compile script)'
+                INTEGRITY_FAILURE='(?i)(?:integrity checksum failed|incorrect integrity|checksum mismatch)'
+                ZIP_FAILURE='(?i)(?:7zip.*error|failed to extract|archive corrupted)'
+                RUNNER_RESOURCE_FAILURE='(?i)(?:out of memory|ENOMEM|disk full|ENOSPC)'
+                WINDOWS_PROCESS_FAILURE='(?i)(?:spawn.*fail|The system cannot find|CreateProcess)'
+                PACKAGING_REBUILD_FAILURE='(?i)(?:failed to rebuild|rebuilding native|node-gyp failed)'
+                AFTER_PACK_HOOK_FAILURE='(?i)(?:afterPack.*fail|afterSign.*fail)'
+                PUBLISH_FAILURE='(?i)(?:publish.*fail|upload.*fail)'
+              }
+              foreach($name in $specificClasses.Keys){
+                Write-Host ('PRIVATE_QA_NSIS_SPECIFIC_'+$name+'='+[bool]($nsisText -match $specificClasses[$name]))
+              }
+              $releasePath=Join-Path $env:RUNNER_TEMP 'private-stage/release'
+              $binCount=@(Get-ChildItem -LiteralPath $releasePath -File -Filter '*.exe' -ErrorAction SilentlyContinue).Count
+              Write-Host ('PRIVATE_NSIS_RESULT_EXE_PRESENT='+[bool]($binCount -gt 0))
+              $lastLineCount=@($nsisText -split '\r?\n' | Where-Object {$_ -match '(?i)error|fail|exit|throw'}).Count
+              Write-Host ('PRIVATE_NSIS_ERROR_LIKE_LINE_COUNT='+[Math]::Min($lastLineCount,100))
+              $shortCodes=[regex]::Matches($nsisText,'\\b(?:ERR_[A-Z0-9_]{4,64}|E(?:ACCES|PERM|NOENT|EXIST|CONNRESET|TIMEDOUT|NOTFOUND|NOSPC|NAMETOOLONG|PROTO|AI_AGAIN))\\b')
+              $codes=@($shortCodes | ForEach-Object {$_.Value} | Select-Object -Unique | Select-Object -First 8)
+              if($codes.Count -gt 0){Write-Host ('PRIVATE_QA_NSIS_SAFE_ERROR_CODES='+($codes -join ','))}
+              foreach($name in $knownClasses.Keys){
+                Write-Host ('PRIVATE_QA_NSIS_DIAGNOSTIC_'+$name+'='+[bool]($nsisText -match $knownClasses[$name]))
+              }
+            }
+            $record=Get-Content $privateLog -Raw
+            $attempts=[regex]::Matches($record,'PRIVATE_QA_PHASE=NSIS_DIRECT_(?:BINARY_RETRY|RETRY_SUCCEEDED|RETRY_FAILED)')
+            Write-Host ('PRIVATE_QA_DIRECT_RETRY_MARKERS='+($attempts.Count))
+            foreach($a in $attempts){Write-Host ('PRIVATE_QA_ATTEMPT='+$a.Value)}
+            if(Test-Path -LiteralPath $nsisLog){
+              # Preapproved generic English vocabulary only. No raw log,
+              # private paths, URLs, source lines, values, IDs or credentials.
+              $allowed=@('error','failed','failure','fatal','exit','code','status','process','terminated',
+                'command','cannot','could','not','find','found','missing','invalid','unrecognized',
+                'unexpected','argument','unknown','required','option','file','directory','path',
+                'package','module','dependency','native','rebuild','electron','builder','nsis',
+                'sign','signing','certificate','installer','installation','configuration',
+                'config','schema','archive','asar','version','runtime','windows','win','setup',
+                'permission','access','denied','exception','execution','message','warning',
+                'artifact','output','input','executable','target','release','publish',
+                'upload','download','network','timeout','certificate','digest','hash',
+                'checksum','integrity','symlink','extract','copy','rename','remove',
+                'read','write','create','open','close','unsupported','environment',
+                'value','type','object','null','undefined','function','property','properties',
+                'string','number','boolean','parse','syntax','operation','system','is',
+                'was','with','at','to','in','from','for','and','or','of','on','the','a','an',
+                'after','before','during','while','as','due','because','by','already',
+                'exists','cannot','isnt','doesnt','trying','use','using','please',
+                'cannot','build','building','built','pack','packaging','unpack',
+                'not','proper','invalid','has','have','had','failed','called')
+              $failureLines=@($nsisText -split '\r?\n' | Where-Object {$_ -match '(?i)error|failed|exception|⨯'})
+              $terminalLine=if($failureLines.Count -gt 0){[string]$failureLines[$failureLines.Count-1]}else{''}
+              $words=@([regex]::Matches($terminalLine,'[A-Za-z]{2,24}') |
+                ForEach-Object {$_.Value.ToLowerInvariant()} |
+                Where-Object {$allowed -contains $_} | Select-Object -First 30)
+              Write-Host ('PRIVATE_QA_SAFE_ERROR_WORDS='+($words -join '_'))
+            }
+            $phases=[regex]::Matches($record,'PRIVATE_QA_PHASE=[A-Z_]+')
+            $lastPhase=if($phases.Count -gt 0){$phases[$phases.Count-1].Value}else{'PRIVATE_QA_PHASE=BEFORE_ARCHIVE_PREFLIGHT'}
+            Write-Host ('DIAGNOSTIC_LAST_VERIFIED_PHASE='+$lastPhase)
+            $match=[regex]::Match($record,$known)
+            $code=if($match.Success){$match.Value}else{'PRIVATE_BUILD_FAILED_DETAILS_RETAINED_ONLY_ON_EPHEMERAL_WINDOWS_RUNNER'}
+            try {
+              $probeRelease=Join-Path $env:RUNNER_TEMP 'private-stage/release'
+              $cand=@(Get-ChildItem -LiteralPath $probeRelease -Filter 'TreasuryFlow*.exe' -File -ErrorAction SilentlyContinue | Where-Object {$_.Length -gt 1000000})
+              Write-Host ('DIAGNOSTIC_INSTALLER_COUNT='+$cand.Count)
+              if($cand.Count -eq 1){
+                $testHome=Join-Path $env:RUNNER_TEMP 'v6-diagnostic-installed'
+                $testData=Join-Path $env:RUNNER_TEMP 'v6-diagnostic-data'
+                New-Item -ItemType Directory -Path $testData -Force | Out-Null
+                $p=Start-Process -FilePath $cand[0].FullName -ArgumentList @('/S',('/D='+$testHome)) -PassThru
+                if(!$p.WaitForExit(120000)){try{$p.Kill()}catch{};throw 'TEST_INSTALL_TIMED_OUT'}
+                if($p.ExitCode -ne 0){throw 'TEST_INSTALL_EXIT'}
+                $installedExe=@(Get-ChildItem -LiteralPath $testHome -Recurse -File -Filter 'TreasuryFlow.exe' -ErrorAction SilentlyContinue)
+                if($installedExe.Count -ne 1){throw 'TEST_EXE_NOT_INSTALLED'}
+                Write-Host 'PROBE_PASS_NSIS_INSTALL_WHILE_PACKAGER_EXIT_NONZERO'
+                & node (Join-Path $work $paths[3]) $installedExe[0].FullName $testData *> (Join-Path $work 'private-gui-probe.log')
+                if($LASTEXITCODE -eq 0){
+                  $data=Get-Content (Join-Path $testData 'private-gui-report.json') -Raw | ConvertFrom-Json
+                  if($data.status -eq 'PASS' -and $data.osClipboard){
+                    Write-Host 'PROBE_PASS_REAL_WINDOWS_CLIPBOARD_WHILE_PACKAGER_EXIT_NONZERO'
+                  }else{Write-Host 'PROBE_FAIL_GUI_ASSERTION'}
+                }else{Write-Host 'PROBE_FAIL_GUI_EXECUTION'}
+                $un=@(Get-ChildItem -LiteralPath $testHome -Recurse -File -Filter 'Uninstall*.exe' -ErrorAction SilentlyContinue)
+                if($un.Count -eq 1){
+                  $up=Start-Process -FilePath $un[0].FullName -ArgumentList '/S' -PassThru
+                  if($up.WaitForExit(90000) -and $up.ExitCode -eq 0){Write-Host 'PROBE_PASS_NSIS_UNINSTALL_WHILE_PACKAGER_EXIT_NONZERO'}
+                }
+              }
+            }catch{
+              Write-Host 'PROBE_FAIL_DIAGNOSTIC_INSTALL_OR_GUI'
+            }
+            throw $code
+          }
+          $deliverables=Join-Path $destination 'PRIVATE_QA_DELIVERABLES'
+          $proof=Get-Content (Join-Path $deliverables 'NONFINAL_QA_SHA256_MANIFEST.json') -Raw | ConvertFrom-Json
+          $source=Join-Path $deliverables 'TreasuryFlow_V6_1.0.1_Patched_NONFINAL_QA_Source.zip'
+          $exe=Join-Path $deliverables 'TreasuryFlow_V6_1.0.1_Patched_NONFINAL_QA_Setup.exe'
+          if(!(Test-Path $source) -or !(Test-Path $exe) -or $proof.finalRelease -ne $false -or $proof.v7FinalAccepted -ne $false -or $proof.productionNpmVulnerabilities -ne 0){throw 'NONFINAL_MANIFEST_POLICY_FAILED'}
+          if((Get-FileHash $source -Algorithm SHA256).Hash -ne $proof.patchedSourceSha256 -or
+             (Get-FileHash $exe -Algorithm SHA256).Hash -ne $proof.patchedInstallerSha256){throw 'NONFINAL_MANIFEST_DIGEST_MISMATCH'}
+          Write-Host 'PRIVATE_V6_PATCHED_SOURCE_AND_WINDOWS_SETUP_BUILD_PASS'
+          Write-Host 'PRIVATE_V6_NPM_SECURITY_TEST_TYPECHECK_LINT_BUILD_SMOKE_PASS'
+          Write-Host 'NO_SOURCE_OR_BINARY_UPLOADED_TO_PUBLIC_ARTIFACTS'
+          $env:TF_QA_STAGE_ROOT=Join-Path $env:RUNNER_TEMP 'private-stage'
+          & node --experimental-strip-types --test (Join-Path $work $paths[9]) *> (Join-Path $work 'private-validator-unit.log')
+          if($LASTEXITCODE -ne 0){throw 'EXCEL_PREVIEW_VALIDATOR_BEHAVIOR_TESTS_FAILED'}
+          Write-Host 'GATE_PASS_EXCEL_PREVIEW_IBAN_MOD97_AND_DATE_EDGE_UNIT_TESTS'
+          & node --experimental-strip-types --test (Join-Path $work $paths[11]) *> (Join-Path $work 'private-excel-fuzz.log')
+          if($LASTEXITCODE -ne 0){throw 'EXCEL_SECURITY_FUZZ_TESTS_FAILED'}
+          Write-Host 'GATE_PASS_EXCEL_SECURITY_AND_500_CASE_IBAN_FUZZ_TESTS'
+          $oldGuiSource=Get-Content (Join-Path $work $paths[3]) -Raw
+          $xlsFragment=Get-Content (Join-Path $work $paths[10]) -Raw
+          $insertBefore=" report.status='PASS';"
+          if(!$oldGuiSource.Contains($insertBefore)){throw 'WINDOWS_NATIVE_GUI_PATCH_ANCHOR_MISSING'}
+          $xlsGuiHarness=Join-Path $work 'qa/windows/v6-clipboard-xlsx-roundtrip.mjs'
+          [IO.File]::WriteAllText($xlsGuiHarness,
+            $oldGuiSource.Replace($insertBefore,$xlsFragment+$insertBefore),
+            [Text.UTF8Encoding]::new($false))
+          $env:TF_PRIVATE_STAGE=Join-Path $env:RUNNER_TEMP 'private-stage'
+          # Replay installed native GUI/clipboard acceptance on this exact built EXE.
+          & node --check $xlsGuiHarness
+          if($LASTEXITCODE -ne 0){throw 'INSTALLED_GUI_HARNESS_SYNTAX_FAILED'}
+          $env:BANK_ADAPTER_MODE='disabled'
+          $env:TREASURYFLOW_DESKTOP_LOCAL='1'
+          $env:TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ='0'
+          $env:TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ='0'
+          $env:TREASURYFLOW_ENABLE_SQL_LAB='0'
+          $isolation=Join-Path $env:RUNNER_TEMP 'v6-gui-test-data'
+          $installDir=Join-Path $env:RUNNER_TEMP 'TreasuryFlow-V6-Isolated-Installed'
+          New-Item -ItemType Directory -Path $isolation -Force | Out-Null
+          $install=Start-Process -FilePath $exe -ArgumentList @('/S',('/D='+$installDir)) -PassThru
+          if(!$install.WaitForExit(240000)){try{$install.Kill()}catch{};throw 'V6_NSIS_INSTALL_TIMEOUT'}
+          if($install.ExitCode -ne 0){throw 'V6_NSIS_NONZERO_EXIT'}
+          $installed=@(Get-ChildItem -LiteralPath $installDir -Recurse -Filter 'TreasuryFlow.exe' -File -ErrorAction SilentlyContinue)
+          if($installed.Count -ne 1){throw 'INSTALLED_V6_EXE_NOT_UNIQUE'}
+          Write-Host 'GATE_PASS_SAME_ARTIFACT_NSIS_INSTALL'
+          $guiLog=Join-Path $work 'private-installed-gui-log.txt'
+          & node $xlsGuiHarness $installed[0].FullName $isolation *> $guiLog
+          if($LASTEXITCODE -ne 0){
+            $guiRecord=Get-Content (Join-Path $isolation 'private-gui-report.json') -Raw | ConvertFrom-Json
+            $safe=$guiRecord.failure -replace '[^A-Z0-9_ ]',''
+            if(!$safe){$safe='UNKNOWN'}
+            throw ('V6_SAME_ARTIFACT_INSTALLED_GUI_FAILED_'+$safe)
+          }
+          $guiRecord=Get-Content (Join-Path $isolation 'private-gui-report.json') -Raw | ConvertFrom-Json
+          if($guiRecord.status -ne 'PASS' -or !$guiRecord.osClipboard -or !$guiRecord.bankDisabled -or
+             !$guiRecord.copyButton -or !$guiRecord.writable -or !$guiRecord.select){throw 'V6_SAME_ARTIFACT_GUI_REPORT_FAIL'}
+          Write-Host 'GATE_PASS_SAME_ARTIFACT_INSTALLED_WINDOWS_OS_CLIPBOARD'
+          if(!$guiRecord.excelNativeInput -or !$guiRecord.excelInvalidRejected -or
+             !$guiRecord.excelValidPreview -or !$guiRecord.excelNoPaymentSideEffects -or
+             !$guiRecord.excelRoundtrip -or !$guiRecord.excelUnsafeNumericRejected -or
+             !$guiRecord.excelInvalidDateRejected -or !$guiRecord.excelCaseFoldDuplicateRejected){throw ('NATIVE_EXCEL_ROUNDTRIP_FAILED_AT_'+([string]$guiRecord.stage -replace '[^A-Z0-9_]',''))}
+          Write-Host 'GATE_PASS_SAME_ARTIFACT_REAL_XLSX_FILE_INPUT_NEGATIVE_POSITIVE_EXPORT_ROUNDTRIP'
+
+          # Isolate SSR route availability independently of the CDP file-picker.
+          # This gate is deliberately NOT treated as positive workbook import.
+          $env:TREASURYFLOW_DATA_FILE=Join-Path $isolation 'excel-ssr-probe-only.sqlite'
+          $browser=Start-Process -FilePath $installed[0].FullName -PassThru
+          try {
+            $ready=$false
+            for($n=0;$n -lt 90;$n++){
+              try{
+                $health=Invoke-RestMethod -Uri 'http://127.0.0.1:3210/api/ready' -TimeoutSec 2
+                if($health.status -eq 'ready' -and $health.bankAdapter -eq 'disabled'){$ready=$true;break}
+              }catch{}
+              Start-Sleep -Seconds 1
+            }
+            if(!$ready){throw 'INSTALLED_EXCEL_SSR_STARTUP_FAILED'}
+            Write-Host 'GATE_PASS_EXCEL_SSR_LOCAL_APP_READY_BANK_DISABLED'
+            $page=Invoke-WebRequest -Uri 'http://127.0.0.1:3210/excel-preview' -TimeoutSec 20 -UseBasicParsing
+            Write-Host ('QA_EXCEL_ROUTE_HTTP_STATUS='+[int]$page.StatusCode)
+            $hasInput=$page.Content.Contains('xlsx-preview-upload')
+            Write-Host ('QA_EXCEL_ROUTE_SSR_HAS_FILE_INPUT='+[bool]$hasInput)
+            if($page.StatusCode -ne 200 -or !$hasInput){throw 'INSTALLED_EXCEL_SSR_ROUTE_INPUT_MISSING'}
+            Write-Host 'GATE_PASS_SAME_ARTIFACT_EXCEL_SSR_FILE_INPUT'
+          }finally{
+            if($browser -and !$browser.HasExited){& taskkill.exe /T /F /PID $browser.Id *> $null}
+          }
+          Write-Host 'GATE_PASS_SAME_ARTIFACT_NATIVE_EXCEL_FILE_PICKER_PREVIEW_ROUNDTRIP'
+          $uninstall=@(Get-ChildItem -LiteralPath $installDir -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object {$_.Name -match '^uninstall.*[.]exe$'})
+          if($uninstall.Count -ne 1){throw 'V6_NSIS_UNINSTALLER_NOT_FOUND'}
+          $uninstallProcess=Start-Process -FilePath $uninstall[0].FullName -ArgumentList '/S' -PassThru
+          if(!$uninstallProcess.WaitForExit(90000)){try{$uninstallProcess.Kill()}catch{};throw 'V6_UNINSTALL_TIMEOUT'}
+          if($uninstallProcess.ExitCode -ne 0){throw 'V6_UNINSTALL_NONZERO'}
+          for($i=0;$i -lt 90;$i++){
+            $remaining=@(Get-ChildItem -LiteralPath $installDir -Recurse -File -Filter 'TreasuryFlow.exe' -ErrorAction SilentlyContinue)
+            if($remaining.Count -eq 0){break}
+            Start-Sleep -Seconds 1
+          }
+          if($remaining.Count -gt 0){throw 'V6_UNINSTALL_LEFT_BINARY'}
+          Write-Host 'GATE_PASS_SAME_ARTIFACT_NSIS_UNINSTALL'
+          Write-Host 'V6_NONFINAL_EXCEL_PREVIEW_ROUNDTRIP_PASS_FINANCIAL_IMPORT_NOT_TESTED'
+
