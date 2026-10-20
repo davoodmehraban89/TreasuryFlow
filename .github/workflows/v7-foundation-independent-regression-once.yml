@@ -1,0 +1,48 @@
+name: V7 foundation independent Linux quality and production fail-closed QA
+on:
+  push:
+    paths:
+      - .github/workflows/v7-foundation-independent-regression-once.yml
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase-7-production-infrastructure-bank-golive
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Static type, unit, lint and build gates
+        run: |
+          npm run typecheck
+          npm test
+          npm run lint
+          npm run build
+          npm run smoke
+      - name: Production evidence must fail closed without external authorization
+        shell: bash
+        run: |
+          set +e
+          output=$(npm run verify:external-evidence 2>&1)
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo 'GATE_FAIL_PRODUCTION_EVIDENCE_ACCEPTED_WITHOUT_AUTHORIZATION'
+            exit 1
+          fi
+          if ! printf '%s' "$output" | grep -q 'BLOCKED_EXTERNAL'; then
+            echo 'GATE_FAIL_EXPECTED_EXTERNAL_BLOCKER_MARKER_MISSING'
+            exit 1
+          fi
+          echo 'GATE_PASS_PRODUCTION_RELEASE_FAILS_CLOSED_WITHOUT_REAL_EVIDENCE'
+      - name: Final nonfinal foundation declaration
+        run: |
+          echo 'GATE_PASS_REPOSITORY_PHASE7_QUALITY_BRANCH_ONLY'
+          echo 'NOT_A_V7_PRIVATE_INTEGRATED_WINDOWS_RELEASE'
