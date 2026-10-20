@@ -1,0 +1,50 @@
+name: V6 private payments page Excel link anchor check
+on:
+  push:
+    paths:
+      - .github/workflows/v6-payments-navigation-anchor-linux-once.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - name: Verify private source and inspect only interface metadata
+        shell: bash
+        env:
+          TF_VALIDATION_READ_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$TF_VALIDATION_READ_TOKEN"
+          export GH_TOKEN="$TF_VALIDATION_READ_TOKEN"
+          mkdir -p /tmp/tf-v6-excel-inspection
+          gh release download validation-inputs-20261017 --repo davoodmehraban89/TreasuryFlow-Validation-Private --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir /tmp/tf-v6-excel-inspection >/dev/null 2>&1
+          printf '%s  %s\n' '9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f' '/tmp/tf-v6-excel-inspection/TreasuryFlow_Validation_Staging_20261017.zip' | sha256sum -c --status
+          unset GH_TOKEN TF_VALIDATION_READ_TOKEN
+          mkdir /tmp/tf-v6-excel-inspection/staging
+          unzip -qq /tmp/tf-v6-excel-inspection/TreasuryFlow_Validation_Staging_20261017.zip -d /tmp/tf-v6-excel-inspection/staging
+          cd /tmp/tf-v6-excel-inspection/staging
+          node <<'NODE'
+          const fs=require('node:fs'),path=require('node:path');
+          if(JSON.parse(fs.readFileSync('package.json','utf8')).version!=='1.0.1')throw Error('STAGE_VERSION_CHANGED');
+          const files=[];const walk=(dir)=>{for(const x of fs.readdirSync(dir,{withFileTypes:true})){const full=path.join(dir,x.name);if(x.isDirectory())walk(full);else if(x.isFile()&&/[.]tsx?$/.test(x.name))files.push(full)}};
+          walk('src');
+          const pages=files.filter(x=>/[/\\]app[/\\].*[/\\]page[.]tsx$/.test(x));
+          const excelModules=files.filter(x=>/excel|xlsx|workbook|spreadsheet|import|export/i.test(path.basename(x)));
+          const excelTests=files.filter(x=>/[.]test[.]/i.test(path.basename(x))&&/excel|xlsx|workbook|spreadsheet/i.test(x));
+          const scan=(re)=>pages.filter(x=>re.test(fs.readFileSync(x,'utf8'))).length;
+          const fileInputCount=scan(/type\\s*=\\s*['"]file['"]|<input[^>]+type\\s*=\\s*['"]file['"]/i);
+          const excelRouteCount=scan(/\\.xlsx|\\.xls|Excel|import.*workbook|ورود فایل|بارگذاری فایل|خروجی اکسل/i);
+          console.log('GATE_PASS_V6_PRIVATE_ARCHIVE_SHA256');
+          console.log('QA_ROUTE_COUNT='+pages.length);
+          console.log('QA_EXCEL_MODULE_FILE_COUNT='+excelModules.length);
+          console.log('QA_EXCEL_TEST_FILE_COUNT='+excelTests.length);
+          console.log('QA_UPLOAD_INPUT_PAGE_COUNT='+fileInputCount);
+          console.log('QA_EXCEL_MENTION_PAGE_COUNT='+excelRouteCount);
+          const pay=fs.readFileSync('src/app/payments/page.tsx','utf8');
+          const anchor='<Link className="btn btn-primary" href="/payments/new">+ ثبت حواله</Link>';
+          console.log('QA_EXCEL_NAVIGATION_ANCHOR_PRESENT='+pay.includes(anchor));
+          if(!pay.includes(anchor))throw Error('PAYMENTS_EXCEL_NAVIGATION_ANCHOR_ABSENT');
+          console.log('GATE_PASS_ONLY_AGGREGATED_STATIC_METADATA_EMITTED');
+          NODE
