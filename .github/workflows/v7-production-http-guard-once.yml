@@ -1,0 +1,53 @@
+name: V7 foundation production fail-closed HTTP gate regression
+on:
+  push:
+    paths:
+      - .github/workflows/v7-production-http-guard-once.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Unit tests and typecheck
+        run: |
+          npm test
+          npm run typecheck
+          npm run lint
+      - name: Production compile
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: npm run build
+      - name: Exact production smoke with operational denial
+        run: npm run smoke
+      - name: Production unauthorized API direct HTTP probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DATABASE_URL=evidence-ref IDENTITY_PROVIDER=oidc-ref AUTH_PROXY_HMAC_SECRET=smoke-secret KMS_KEY_ID=kms-ref SIEM_ENDPOINT=siem-ref WAF_POLICY_ID=waf-ref ALERT_CHANNEL=ops-ref BANK_ADAPTER_MODE=disabled
+          node_modules/.bin/next start -p 3102 > /tmp/ts-guard.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:3102/api/ready > /dev/null; then break; fi
+            sleep 0.5
+          done
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3102/api/ready)" = 200
+          for endpoint in / /dashboard /payments /accounts /api/transfer/submit /reports/export; do
+            status=$(curl -s -o /tmp/ts-gate-response -w '%{http_code}' "http://127.0.0.1:3102$endpoint")
+            test "$status" = 403
+            grep -q 'دسترسی عملیاتی مسدود است' /tmp/ts-gate-response
+          done
+          echo 'GATE_PASS_PRODUCTION_ACCESS_DENIES_OPERATIONAL_ROUTES_AND_API'
+      - name: No V7 deployment claim
+        run: echo 'GATE_PASS_REPO_HTTP_PRODUCTION_GATE_ONLY_NOT_V7_RELEASE'
