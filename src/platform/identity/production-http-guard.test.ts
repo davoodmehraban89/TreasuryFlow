@@ -21,6 +21,16 @@ describe('production access fails closed at ingress',()=>{
       expect(blocked({...production,...x},'/payments')).toBe(true);
     }
   });
+  it('never treats live-bank mode as an operational authorization, even on desktop',()=>{
+    for(const local of ['1','0',undefined]){
+      for(const nodeMode of ['production','development']){
+        const e={NODE_ENV:nodeMode,TREASURYFLOW_DESKTOP_LOCAL:local,BANK_ADAPTER_MODE:'live'};
+        expect(blocked(e,'/payments')).toBe(true);
+        expect(blocked(e,'/api/transfer/submit')).toBe(true);
+        expect(blocked(e,'/api/ready')).toBe(false);
+      }
+    }
+  });
   it('preserves isolated local desktop and developer flow',()=>{
     expect(blocked({NODE_ENV:'development'},'/dashboard')).toBe(false);
     expect(blocked({NODE_ENV:'production',TREASURYFLOW_DESKTOP_LOCAL:'1'},'/payments')).toBe(false);
