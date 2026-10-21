@@ -31,7 +31,7 @@ jobs:
           gh api 'repos/davoodmehraban89/TreasuryFlow-Validation-Private/contents/qa/patches/v6-add-readonly-sqlserver-adapter.mjs?ref=cfb45189494e0cb7cfe04b3f1c3b9c1948c8cef0' --jq .content 2>/dev/null | base64 -d > "$RUNNER_TEMP/v6-private-sql-additive-patch.mjs"
           test -s "$RUNNER_TEMP/v6-private-sql-additive-patch.mjs"
           echo "TF_SQL_PATCH=$RUNNER_TEMP/v6-private-sql-additive-patch.mjs" >> "$GITHUB_ENV"
-          gh api 'repos/davoodmehraban89/TreasuryFlow-Validation-Private/contents/qa/patches/v6-add-synthetic-sql-lab-ui.mjs?ref=13402937746a350e4ed6ba799a61718eb4458c88' --jq .content 2>/dev/null | base64 -d > "$RUNNER_TEMP/v6-sql-lab-ui-patch.mjs"
+          gh api 'repos/davoodmehraban89/TreasuryFlow-Validation-Private/contents/qa/patches/v6-add-synthetic-sql-lab-ui.mjs?ref=4a92c1cc835714a7204f4b48b7524dec11beee8d' --jq .content 2>/dev/null | base64 -d > "$RUNNER_TEMP/v6-sql-lab-ui-patch.mjs"
           test -s "$RUNNER_TEMP/v6-sql-lab-ui-patch.mjs"
           echo "TF_SQL_UI_PATCH=$RUNNER_TEMP/v6-sql-lab-ui-patch.mjs" >> "$GITHUB_ENV"
           echo 'GATE_PASS_PINNED_V6_SOURCE_SHA256'
@@ -197,7 +197,7 @@ jobs:
                 await pause(500);
               }
               assert(healthy,'NEXT_SQL_LAB_HTTP_SERVER_NOT_READY');
-              const r=await fetch(url+'/integrations',{signal:AbortSignal.timeout(20000)});
+              const r=await fetch(url+'/integrations/sql-lab',{signal:AbortSignal.timeout(20000)});
               assert.equal(r.status,200,'NEXT_SQL_LAB_INTEGRATIONS_HTTP_STATUS');
               const html=await r.text();
               assert(html.includes(marker),'NEXT_SQL_LAB_MARKER_MISSING');
