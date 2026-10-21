@@ -1,0 +1,58 @@
+name: V7 production HTTP guard three independent QA perspectives
+on:
+  push:
+    paths:
+      - .github/workflows/v7-production-three-angle-qa-once.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  functional:
+    name: Functional QA (hosted Linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run smoke
+      - run: echo GATE_PASS_FUNCTIONAL_QA_HTTP_GUARD
+  security:
+    name: Security and code quality (separate hosted Linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck && npm run lint
+      - run: npm run build
+      - run: node qa/scripts/production-http-security.mjs
+      - run: echo GATE_PASS_SECURITY_SPOOF_AND_UNAUTHORIZED_WRITES
+  edge:
+    name: Edge case and misuse QA (separate hosted Linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: node qa/scripts/production-http-edge-cases.mjs
+      - run: echo GATE_PASS_EDGE_CASE_QA_UNUSUAL_URLS
