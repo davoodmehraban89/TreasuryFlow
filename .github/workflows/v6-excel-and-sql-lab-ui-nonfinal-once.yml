@@ -24,7 +24,7 @@ jobs:
           if([string]::IsNullOrWhiteSpace($env:TF_VALIDATION_READ_TOKEN)){throw 'PRIVATE_READ_TOKEN_NOT_AVAILABLE'}
           $env:GH_TOKEN=$env:TF_VALIDATION_READ_TOKEN
           $private='davoodmehraban89/TreasuryFlow-Validation-Private'
-          $branch='4a92c1cc835714a7204f4b48b7524dec11beee8d'
+          $branch='e22a33379d07089a4f00b956010c7f316be2f806'
           $work=Join-Path $env:RUNNER_TEMP 'v6-protected-builder'
           New-Item -ItemType Directory -Path $work -Force | Out-Null
           $paths=@('qa/scripts/rebuild-v6-private-nonfinal-qa.ps1',
@@ -270,6 +270,12 @@ jobs:
           if($integrationResponse.StatusCode -ne 200 -or !$integrationResponse.Content.Contains('sql-lab-inactive') -or
              $integrationResponse.Content.Contains('sql-lab-readonly')){throw 'UNAUTHORIZED_SQL_LAB_PREVIEW_NOT_DISABLED'}
           Write-Host 'GATE_PASS_INSTALLED_SQL_LAB_UI_DISABLED_WITHOUT_EXPLICIT_FLAGS'
+          $integrationRoot=Invoke-WebRequest -Uri 'http://127.0.0.1:3210/integrations' -TimeoutSec 15 -UseBasicParsing
+          if($integrationRoot.StatusCode -ne 200 -or !$integrationRoot.Content.Contains('href="/integrations/sql-lab"')){
+            throw 'INTEGRATIONS_NAV_MISSING_READONLY_SQL_LAB_LINK'
+          }
+          Write-Host 'GATE_PASS_INSTALLED_INTEGRATIONS_NAV_SQL_LAB_LINK'
+
 
           }finally{
             if($browser -and !$browser.HasExited){& taskkill.exe /T /F /PID $browser.Id *> $null}
