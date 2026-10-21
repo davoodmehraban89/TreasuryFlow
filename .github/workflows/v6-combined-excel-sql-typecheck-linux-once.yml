@@ -1,0 +1,62 @@
+name: V6 private combined Excel SQL lab source typecheck and build QA
+on:
+  push:
+    paths:
+      - .github/workflows/v6-combined-excel-sql-typecheck-linux-once.yml
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fetch pinned private original and guarded patches
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          private=davoodmehraban89/TreasuryFlow-Validation-Private
+          work="$RUNNER_TEMP/v6-private-combined"
+          mkdir -p "$work/src"
+          gh release download validation-inputs-20261017 --repo "$private" --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir "$work" >/dev/null 2>&1
+          test "$(sha256sum "$work/TreasuryFlow_Validation_Staging_20261017.zip" | cut -d' ' -f1)" = 9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f
+          unzip -qq "$work/TreasuryFlow_Validation_Staging_20261017.zip" -d "$work/src"
+          for entry in v6-add-readonly-sqlserver-adapter.mjs v6-add-excel-isolated-preview.mjs v6-add-synthetic-sql-lab-ui.mjs; do
+            gh api "repos/$private/contents/qa/patches/$entry?ref=4d4a79ad4954ae9c6430b986c6e896dd8da6a47a" --jq .content 2>/dev/null | base64 -d > "$work/$entry"
+            test -s "$work/$entry"
+          done
+          unset GH_TOKEN
+          echo "QA_WORK=$work" >> "$GITHUB_ENV"
+          echo GATE_PASS_ORIGINAL_PRIVATE_ZIP_HASH
+      - name: Apply opt-in additive patches to disposable stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          for entry in v6-add-readonly-sqlserver-adapter.mjs v6-add-excel-isolated-preview.mjs v6-add-synthetic-sql-lab-ui.mjs; do
+            node --check "$QA_WORK/$entry"
+            node "$QA_WORK/$entry" "$QA_WORK/src" > "$QA_WORK/$entry.log" 2>&1 || {
+              echo 'QA_PATCH_FAILED_'"${entry%%.*}"
+              exit 1
+            }
+          done
+          echo GATE_PASS_THREE_ADDITIVE_PRIVATE_PATCHES
+      - name: Isolated Linux regression without customer data
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$QA_WORK/src"
+          npm ci --no-audit --no-fund > "$QA_WORK/npm-ci.log" 2>&1 || { echo 'QA_NPM_CI_FAILED'; exit 1; }
+          npm test -- --reporter=dot > "$QA_WORK/test.log" 2>&1 || { echo 'QA_UNIT_FAILED'; exit 1; }
+          echo GATE_PASS_COMBINED_SQL_EXCEL_UNIT
+          npm run typecheck > "$QA_WORK/typecheck.log" 2>&1 || { echo 'QA_TYPECHECK_FAILED'; exit 1; }
+          echo GATE_PASS_COMBINED_SQL_EXCEL_TYPESCRIPT
+          npm run lint > "$QA_WORK/lint.log" 2>&1 || { echo 'QA_LINT_FAILED'; exit 1; }
+          echo GATE_PASS_COMBINED_SQL_EXCEL_LINT
+          npm run build > "$QA_WORK/build.log" 2>&1 || { echo 'QA_NEXT_BUILD_FAILED'; exit 1; }
+          echo GATE_PASS_COMBINED_SQL_EXCEL_NEXT_BUILD
+          echo 'ONLY_SYNTHETIC_UI_PREVIEW_NO_FINANCIAL_IMPORT_AND_NO_V7_RELEASE'
