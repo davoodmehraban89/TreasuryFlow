@@ -48,7 +48,15 @@ jobs:
           node "$TF_SQL_PATCH" "$TF_ROOT" > "$RUNNER_TEMP/private-sql-patch-applied.log" 2>&1 || { echo 'V6_PRIVATE_SQL_PATCH_APPLY_FAILED'; exit 1; }
           grep '^GATE_PASS_' "$RUNNER_TEMP/private-sql-patch-applied.log"
           node --check "$TF_SQL_UI_PATCH" >/dev/null 2> "$RUNNER_TEMP/private-ui-patch-syntax.log" || { echo 'V6_PRIVATE_SQL_UI_PATCH_SYNTAX_ERROR'; exit 1; }
-          node "$TF_SQL_UI_PATCH" "$TF_ROOT" > "$RUNNER_TEMP/private-ui-patch-applied.log" 2>&1 || { echo 'V6_PRIVATE_SQL_UI_PATCH_APPLY_FAILED'; exit 1; }
+          node "$TF_SQL_UI_PATCH" "$TF_ROOT" > "$RUNNER_TEMP/private-ui-patch-applied.log" 2>&1 || {
+            page="$TF_ROOT/src/app/integrations/page.tsx"
+            echo 'SQL_UI_SOURCE_PAGE_PRESENT='$(test -f "$page" && echo true || echo false)
+            echo 'SQL_UI_SOURCE_EDITOR_IMPORT_PRESENT='$(grep -Fq "import {QueryEditor} from './query-editor';" "$page" && echo true || echo false)
+            echo 'SQL_UI_SOURCE_EDITOR_JSX_PRESENT='$(grep -Fq '<QueryEditor/>' "$page" && echo true || echo false)
+            echo 'SQL_UI_SOURCE_PREEXISTING_LAB_PRESENT='$(grep -Fq 'ReadOnlySqlLab' "$page" && echo true || echo false)
+            echo 'V6_PRIVATE_SQL_UI_PATCH_APPLY_FAILED'
+            exit 1
+          }
           grep '^GATE_PASS_' "$RUNNER_TEMP/private-ui-patch-applied.log"
 
           npm ci --no-audit --no-fund > "$RUNNER_TEMP/private-npm-install.log" 2>&1 || { echo 'PRIVATE_NPM_CI_FAILED'; exit 1; }
