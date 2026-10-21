@@ -1,0 +1,228 @@
+name: V6 real SQL Server 2022 guarded UI integration private synthetic
+on:
+  push:
+    branches: ['ci/public-windows-bridge-probe-20261017']
+    paths: ['.github/workflows/v6-sql-real-engine-ui-guarded-once.yml']
+permissions:
+  contents: read
+jobs:
+  sql-adapter:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    env:
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ: '0'
+      TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ: '0'
+      TREASURYFLOW_ENABLE_SQL_LAB: '0'
+    steps:
+      - name: Pull exact private V6 source with read-only token and verify SHA256
+        env:
+          GH_TOKEN: ${{ secrets.TF_VALIDATION_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          gh release download validation-inputs-20261017 --repo davoodmehraban89/TreasuryFlow-Validation-Private --pattern TreasuryFlow_Validation_Staging_20261017.zip --dir "$RUNNER_TEMP" >/dev/null 2>&1
+          f="$RUNNER_TEMP/TreasuryFlow_Validation_Staging_20261017.zip"
+          test "$(sha256sum "$f" | cut -d' ' -f1)" = '9ce46ce2d2a437e08cbf28146b2cf2ac0ed078c71f1aeb537764390cdd3c552f'
+          mkdir -p "$RUNNER_TEMP/tf-stage"
+          unzip -q "$f" -d "$RUNNER_TEMP/tf-stage"
+          echo "TF_ROOT=$RUNNER_TEMP/tf-stage" >> "$GITHUB_ENV"
+          gh api 'repos/davoodmehraban89/TreasuryFlow-Validation-Private/contents/qa/patches/v6-add-readonly-sqlserver-adapter.mjs?ref=cfb45189494e0cb7cfe04b3f1c3b9c1948c8cef0' --jq .content 2>/dev/null | base64 -d > "$RUNNER_TEMP/v6-private-sql-additive-patch.mjs"
+          test -s "$RUNNER_TEMP/v6-private-sql-additive-patch.mjs"
+          echo "TF_SQL_PATCH=$RUNNER_TEMP/v6-private-sql-additive-patch.mjs" >> "$GITHUB_ENV"
+          gh api 'repos/davoodmehraban89/TreasuryFlow-Validation-Private/contents/qa/patches/v6-add-synthetic-sql-lab-ui.mjs?ref=13402937746a350e4ed6ba799a61718eb4458c88' --jq .content 2>/dev/null | base64 -d > "$RUNNER_TEMP/v6-sql-lab-ui-patch.mjs"
+          test -s "$RUNNER_TEMP/v6-sql-lab-ui-patch.mjs"
+          echo "TF_SQL_UI_PATCH=$RUNNER_TEMP/v6-sql-lab-ui-patch.mjs" >> "$GITHUB_ENV"
+          echo 'GATE_PASS_PINNED_V6_SOURCE_SHA256'
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply guarded private read-only adapter implementation and test code
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$TF_ROOT"
+          node --check "$TF_SQL_PATCH" >/dev/null 2> "$RUNNER_TEMP/private-sql-patch-syntax.log" || { echo 'V6_PRIVATE_SQL_PATCH_SYNTAX_ERROR'; exit 1; }
+          node "$TF_SQL_PATCH" "$TF_ROOT" > "$RUNNER_TEMP/private-sql-patch-applied.log" 2>&1 || { echo 'V6_PRIVATE_SQL_PATCH_APPLY_FAILED'; exit 1; }
+          grep '^GATE_PASS_' "$RUNNER_TEMP/private-sql-patch-applied.log"
+          node --check "$TF_SQL_UI_PATCH" >/dev/null 2> "$RUNNER_TEMP/private-ui-patch-syntax.log" || { echo 'V6_PRIVATE_SQL_UI_PATCH_SYNTAX_ERROR'; exit 1; }
+          node "$TF_SQL_UI_PATCH" "$TF_ROOT" > "$RUNNER_TEMP/private-ui-patch-applied.log" 2>&1 || { echo 'V6_PRIVATE_SQL_UI_PATCH_APPLY_FAILED'; exit 1; }
+          grep '^GATE_PASS_' "$RUNNER_TEMP/private-ui-patch-applied.log"
+
+          npm ci --no-audit --no-fund > "$RUNNER_TEMP/private-npm-install.log" 2>&1 || { echo 'PRIVATE_NPM_CI_FAILED'; exit 1; }
+          npx --no-install vitest run src/platform/integration/v6-readonly-mayan-sql-client.test.ts --reporter=dot > "$RUNNER_TEMP/private-v6-sql-unit.log" 2>&1 || { echo 'V6_SQL_ADAPTER_UNIT_TESTS_FAILED'; exit 1; }
+          echo 'GATE_PASS_V6_SQL_ADAPTER_UNIT_SECURITY_TESTS'
+          npm run typecheck > "$RUNNER_TEMP/private-v6-sql-typecheck.log" 2>&1 || { echo 'V6_SQL_ADAPTER_TYPESCRIPT_TYPECHECK_FAILED'; exit 1; }
+          echo 'GATE_PASS_V6_SQL_ADAPTER_TYPESCRIPT_TYPECHECK'
+          npm run build > "$RUNNER_TEMP/private-sql-ui-next-build.log" 2>&1 || { echo 'V6_SQL_UI_NEXT_BUILD_FAILED'; exit 1; }
+          echo 'GATE_PASS_V6_SQL_UI_NEXT_BUILD'
+      - name: Launch real SQL Server 2022 Developer with synthetic-only view-only login
+        shell: bash
+        run: |
+          set -euo pipefail
+          sa="A@$(openssl rand -hex 20)q9"
+          ro="X@$(openssl rand -hex 20)r8"
+          echo "::add-mask::$sa"
+          echo "::add-mask::$ro"
+          echo "TF_SYNTH_SQL_SA=$sa" >> "$GITHUB_ENV"
+          echo "TF_SYNTH_SQL_RO=$ro" >> "$GITHUB_ENV"
+          docker pull mcr.microsoft.com/mssql/server:2022-latest > "$RUNNER_TEMP/private-sql-pull.log" 2>&1
+          docker run -d --name tf-synthetic-sql -e ACCEPT_EULA=Y -e MSSQL_PID=Developer -e MSSQL_SA_PASSWORD="$sa" -p 127.0.0.1:1433:1433 mcr.microsoft.com/mssql/server:2022-latest > "$RUNNER_TEMP/private-sql-container.log" 2>&1
+          flag=0
+          for i in $(seq 1 90); do
+            if docker exec tf-synthetic-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$sa" -C -b -Q 'SELECT 1;' > "$RUNNER_TEMP/private-sql-probe.log" 2>&1; then flag=1; break; fi
+            sleep 3
+          done
+          test "$flag" = 1
+          cat > "$RUNNER_TEMP/tf-synthetic-sql-schema.sql" <<'SQL'
+          CREATE DATABASE TreasuryFlowSyntheticCI;
+          GO
+          USE TreasuryFlowSyntheticCI;
+          GO
+          CREATE TABLE dbo.SyntheticTransfers (
+            Row_ID int NOT NULL PRIMARY KEY,
+            Destination_IBAN varchar(34) NOT NULL,
+            Beneficiary_Name nvarchar(120) NOT NULL,
+            Amount_IRR bigint NOT NULL CHECK(Amount_IRR > 0),
+            Client_Reference varchar(32) NOT NULL UNIQUE,
+            Payment_Identifier varchar(32) NULL,
+            Deposit_Identifier varchar(32) NULL
+          );
+          INSERT dbo.SyntheticTransfers VALUES
+            (1,'TF_ONLY_FAKE_IBAN_1',N'Artificial Party One',1250000,'TF-SYNTHETIC-00001','PAY-FAKE','DEP-FAKE'),
+            (2,'TF_ONLY_FAKE_IBAN_2',N'Artificial Party Two',3250000,'TF-SYNTHETIC-00002',NULL,NULL);
+          GO
+          CREATE VIEW dbo.vw_SyntheticTransfers AS
+             SELECT Row_ID,Destination_IBAN,Beneficiary_Name,Amount_IRR,Client_Reference,
+                    Payment_Identifier,Deposit_Identifier FROM dbo.SyntheticTransfers;
+          GO
+          SQL
+          docker cp "$RUNNER_TEMP/tf-synthetic-sql-schema.sql" tf-synthetic-sql:/tmp/tf-synthetic.sql
+          docker exec tf-synthetic-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$sa" -C -b -i /tmp/tf-synthetic.sql > "$RUNNER_TEMP/private-sql-seed.log" 2>&1 || { echo 'SQL_SYNTH_SCHEMA_FAILED'; exit 1; }
+          docker exec tf-synthetic-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$sa" -C -b -Q "CREATE LOGIN [tf_synthetic_reader] WITH PASSWORD = N'$ro';" > "$RUNNER_TEMP/private-sql-login.log" 2>&1 || { echo 'SQL_LOGIN_SETUP_FAILED'; exit 1; }
+          docker exec tf-synthetic-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$sa" -C -b -d TreasuryFlowSyntheticCI -Q "CREATE USER tf_synthetic_reader FOR LOGIN tf_synthetic_reader; GRANT SELECT ON OBJECT::dbo.vw_SyntheticTransfers TO tf_synthetic_reader;" > "$RUNNER_TEMP/private-sql-grants.log" 2>&1 || { echo 'SQL_VIEW_GRANT_FAILED'; exit 1; }
+          echo 'GATE_PASS_REAL_SQL2022_SYNTHETIC_VIEW_ONLY_PRINCIPAL'
+      - name: Execute new protected V6 SQL view-only adapter against real SQL Server 2022
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$TF_ROOT/temporary-private-v6-actual-sql-smoke.cjs" <<'NODE'
+          const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
+          const ts=require('typescript'),sql=require('mssql');
+          const p=path.join(process.cwd(),'src/platform/integration/v6-readonly-mayan-sql-client.ts');
+          const compiled=ts.transpileModule(fs.readFileSync(p,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
+          const mod=path.join(process.cwd(),'temporary-private-v6-sql-driver.cjs');
+          fs.writeFileSync(mod,compiled);
+          const {V6SqlServerReadOnlyClient}=require(mod);
+          (async()=>{
+            assert.equal(typeof V6SqlServerReadOnlyClient,'function');
+            const user='tf_synthetic_reader',password=process.env.TF_SYNTH_SQL_RO,db='TreasuryFlowSyntheticCI';
+            const c=new V6SqlServerReadOnlyClient({server:'127.0.0.1',database:db,user,password,approvedViews:['dbo.vw_SyntheticTransfers'],localSyntheticLab:true});
+            assert.equal(await c.testConnection(),true);
+            console.log('GATE_PASS_REAL_SQL_V6_ADAPTER_CONNECT');
+            const schema=await c.inspectApprovedView('dbo.vw_SyntheticTransfers');
+            assert(schema.length>=7);
+            console.log('GATE_PASS_REAL_SQL_V6_APPROVED_VIEW_SCHEMA');
+            const rows=await c.readApprovedView('dbo.vw_SyntheticTransfers',2);
+            assert.equal(rows.length,2);
+            assert.equal(rows[0].Amount_IRR,'1250000');
+            assert.equal(rows[1].Amount_IRR,'3250000');
+            console.log('GATE_PASS_REAL_SQL_V6_VIEW_READ_AND_INTEGER_IRR');
+            await assert.rejects(c.readApprovedView('dbo.SyntheticTransfers',2));
+            const bad=new V6SqlServerReadOnlyClient({
+              server:'127.0.0.1',database:db,user,password,
+              approvedViews:['dbo.SyntheticTransfers'],localSyntheticLab:true
+            });
+            await assert.rejects(bad.readApprovedView('dbo.SyntheticTransfers',2),
+              error=>error.message==='SQL_APPROVED_OBJECT_NOT_A_VIEW');
+            await assert.rejects(bad.inspectApprovedView('dbo.SyntheticTransfers'),
+              error=>error.message==='SQL_APPROVED_OBJECT_NOT_A_VIEW');
+            console.log('GATE_PASS_REAL_SQL_REJECT_APPROVED_BASE_TABLE_EVEN_IF_CONFIGURED');
+            await assert.rejects(c.readApprovedView('dbo.vw_SyntheticTransfers',101));
+            console.log('GATE_PASS_REAL_SQL_V6_VIEW_ALLOWLIST_AND_ROW_LIMIT');
+            const pool=await new sql.ConnectionPool({server:'127.0.0.1',database:db,user,password,options:{encrypt:false,trustServerCertificate:true}}).connect();
+            try{
+              const ops=[
+                'UPDATE dbo.SyntheticTransfers SET Amount_IRR=1 WHERE Row_ID=1',
+                'DELETE FROM dbo.SyntheticTransfers WHERE Row_ID=1',
+                'DROP VIEW dbo.vw_SyntheticTransfers',
+                'SELECT COUNT(*) FROM dbo.SyntheticTransfers'
+              ];
+              for(const q of ops)await assert.rejects(pool.request().query(q));
+              console.log('GATE_PASS_REAL_SQL_V6_PRINCIPAL_DENIES_WRITE_AND_BASE_TABLE_READ');
+            }finally{await pool.close()}
+          })().catch(e=>{console.log('PRIVATE_SQL_REAL_ENGINE_FAILURE_CLASS='+String(e?.name||'OTHER').replace(/[^A-Za-z]/g,''));process.exitCode=1});
+          NODE
+          cd "$TF_ROOT"
+          node temporary-private-v6-actual-sql-smoke.cjs > "$RUNNER_TEMP/private-v6-real-sql-results.log" 2>&1 || {
+            grep '^PRIVATE_SQL_REAL_ENGINE_FAILURE_CLASS=' "$RUNNER_TEMP/private-v6-real-sql-results.log" || true
+            echo 'REAL_SQL_SERVER_V6_ADAPTER_INTEGRATION_FAILED'
+            exit 1
+          }
+          grep '^GATE_PASS_' "$RUNNER_TEMP/private-v6-real-sql-results.log"
+      - name: Exercise live synthetic SQL Server approved-view UI and denied table through actual Next SSR
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$TF_ROOT"
+          cat > "$RUNNER_TEMP/private-v6-sql-ui-http.mjs" <<'NODE'
+          import assert from 'node:assert/strict';
+          import {spawn} from 'node:child_process';
+          const base={...process.env,TREASURYFLOW_DESKTOP_LOCAL:'1',BANK_ADAPTER_MODE:'disabled',
+            TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ:'0',TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ:'0',
+            TREASURYFLOW_ENABLE_SQL_LAB:'1',TF_SQL_LAB_SERVER:'127.0.0.1',
+            TF_SQL_LAB_DATABASE:'TreasuryFlowSyntheticCI',TF_SQL_LAB_USER:'tf_synthetic_reader',
+            TF_SQL_LAB_PASSWORD:process.env.TF_SYNTH_SQL_RO,
+            TF_SQL_LAB_APPROVED_VIEW:'dbo.vw_SyntheticTransfers'};
+          const pause=ms=>new Promise(ok=>setTimeout(ok,ms));
+          async function run(port,changes,marker,forbidden=[]){
+            const child=spawn(process.execPath,['node_modules/next/dist/bin/next','start','-p',String(port)],
+              {env:{...base,...changes},stdio:'ignore'});
+            const url='http://127.0.0.1:'+port;
+            try{
+              let healthy=false;
+              for(let k=0;k<80;k++){
+                try{const x=await fetch(url+'/api/ready',{signal:AbortSignal.timeout(2500)});
+                  if(x.status===200){healthy=true;break}}catch{}
+                await pause(500);
+              }
+              assert(healthy,'NEXT_SQL_LAB_HTTP_SERVER_NOT_READY');
+              const r=await fetch(url+'/integrations',{signal:AbortSignal.timeout(20000)});
+              assert.equal(r.status,200,'NEXT_SQL_LAB_INTEGRATIONS_HTTP_STATUS');
+              const html=await r.text();
+              assert(html.includes(marker),'NEXT_SQL_LAB_MARKER_MISSING');
+              for(const word of forbidden)assert(!html.includes(word),'SQL_LAB_FAIL_CLOSED_LEAK');
+              return html;
+            }finally{child.kill();await pause(600)}
+          }
+          try{
+            const enabled=await run(3171,{},'sql-lab-readonly',['sql-lab-unavailable','sql-lab-inactive']);
+            assert(enabled.includes('TF-SYNTHETIC-00001'),'EXPECTED_REAL_ENGINE_SYNTHETIC_ROW_MISSING');
+            assert(enabled.includes('1250000'),'EXPECTED_INTEGER_IRR_AMOUNT_MISSING');
+            console.log('GATE_PASS_REAL_SQL2022_READONLY_VIEW_RENDERED_IN_UI');
+            await run(3172,{TREASURYFLOW_ENABLE_SQL_LAB:'0'},'sql-lab-inactive',
+              ['TF-SYNTHETIC-00001','sql-lab-readonly']);
+            console.log('GATE_PASS_SQL_UI_FLAG_OFF_DENIES_CONNECTION');
+            await run(3173,{TF_SQL_LAB_APPROVED_VIEW:'dbo.SyntheticTransfers'},'sql-lab-unavailable',
+              ['TF-SYNTHETIC-00001','sql-lab-readonly']);
+            console.log('GATE_PASS_SQL_UI_BASE_TABLE_REFUSED_EVEN_WHEN_CONFIGURED');
+            await run(3174,{TF_SQL_LAB_SERVER:'not-loopback.invalid'},'sql-lab-inactive',
+              ['TF-SYNTHETIC-00001','sql-lab-readonly']);
+            console.log('GATE_PASS_SQL_UI_EXTERNAL_DATABASE_TARGET_BLOCKED');
+          }catch(e){console.log('SQL_UI_HTTP_FAILURE_CLASS='+String(e?.message||'OTHER').replace(/[^A-Za-z0-9_]/g,''));process.exitCode=1}
+          NODE
+          node "$RUNNER_TEMP/private-v6-sql-ui-http.mjs" > "$RUNNER_TEMP/private-sql-ui-http-results.log" 2>&1 || {
+            grep '^SQL_UI_HTTP_FAILURE_CLASS=' "$RUNNER_TEMP/private-sql-ui-http-results.log" || true
+            echo 'REAL_SQL_UI_INTEGRATION_REGRESSION_FAILED'
+            exit 1
+          }
+          grep '^GATE_PASS_' "$RUNNER_TEMP/private-sql-ui-http-results.log"
+      - name: Constrain public disclosure
+        if: always()
+        shell: bash
+        run: |
+          echo 'ONLY_SYNTHETIC_ROWS=YES; SQL_SERVER_2022=REAL_ENGINE'
+          echo 'PRIVATE_SOURCE_SQL_LOGS_PASSWORDS=NOT_UPLOADED'
+          echo 'MAYAN_EXTERNAL_READ=DISABLED; BANK=DISABLED; V7=NOT_ACCEPTED'
