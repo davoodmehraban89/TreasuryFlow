@@ -24,7 +24,7 @@ jobs:
           if([string]::IsNullOrWhiteSpace($env:TF_VALIDATION_READ_TOKEN)){throw 'PRIVATE_READ_TOKEN_NOT_AVAILABLE'}
           $env:GH_TOKEN=$env:TF_VALIDATION_READ_TOKEN
           $private='davoodmehraban89/TreasuryFlow-Validation-Private'
-          $branch='13402937746a350e4ed6ba799a61718eb4458c88'
+          $branch='4a92c1cc835714a7204f4b48b7524dec11beee8d'
           $work=Join-Path $env:RUNNER_TEMP 'v6-protected-builder'
           New-Item -ItemType Directory -Path $work -Force | Out-Null
           $paths=@('qa/scripts/rebuild-v6-private-nonfinal-qa.ps1',
@@ -266,7 +266,7 @@ jobs:
             Write-Host ('QA_EXCEL_ROUTE_SSR_HAS_FILE_INPUT='+[bool]$hasInput)
             if($page.StatusCode -ne 200 -or !$hasInput){throw 'INSTALLED_EXCEL_SSR_ROUTE_INPUT_MISSING'}
             Write-Host 'GATE_PASS_SAME_ARTIFACT_EXCEL_SSR_FILE_INPUT'
-          $integrationResponse=Invoke-WebRequest -Uri 'http://127.0.0.1:3210/integrations' -TimeoutSec 15 -UseBasicParsing
+          $integrationResponse=Invoke-WebRequest -Uri 'http://127.0.0.1:3210/integrations/sql-lab' -TimeoutSec 15 -UseBasicParsing
           if($integrationResponse.StatusCode -ne 200 -or !$integrationResponse.Content.Contains('sql-lab-inactive') -or
              $integrationResponse.Content.Contains('sql-lab-readonly')){throw 'UNAUTHORIZED_SQL_LAB_PREVIEW_NOT_DISABLED'}
           Write-Host 'GATE_PASS_INSTALLED_SQL_LAB_UI_DISABLED_WITHOUT_EXPLICIT_FLAGS'
