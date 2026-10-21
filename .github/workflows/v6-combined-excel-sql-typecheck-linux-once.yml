@@ -59,6 +59,18 @@ jobs:
           const known=['@typescript-eslint/no-unused-vars','@typescript-eslint/no-explicit-any','react/no-unescaped-entities','react-hooks/rules-of-hooks','react-hooks/exhaustive-deps','import/no-unresolved','no-unused-vars'];
           console.log('QA_LINT_SAFE_RULES='+known.filter(x=>c.includes(x)).join(','));
           NODE
+            (cd "$QA_WORK/src" && npx --no-install eslint src/app/integrations/readonly-sql-lab.tsx --format json > "$QA_WORK/readonly-sql-lint.json" 2>/dev/null) || true
+            node - <<'NODE'
+          const fs=require('node:fs'),p=process.env.QA_WORK+'/readonly-sql-lint.json';
+          try{
+            const input=JSON.parse(fs.readFileSync(p,'utf8'));
+            const all=input.flatMap(x=>x.messages||[]);
+            const valid=all.map(x=>x.ruleId).filter(x=>typeof x==='string'&&/^[A-Za-z@/_-]+$/.test(x));
+            console.log('QA_ESLINT_RULE_IDS='+[...new Set(valid)].join(','));
+            console.log('QA_ESLINT_FATAL_ERRORS='+all.filter(x=>x.fatal).length);
+            console.log('QA_ESLINT_COUNT='+all.length);
+          }catch{console.log('QA_ESLINT_JSON_UNAVAILABLE')}
+          NODE
             echo 'QA_PRETEST_LINT_FAILED'
             exit 1
           }
