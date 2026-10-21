@@ -56,8 +56,8 @@ jobs:
           const fs=require('node:fs'),p=process.env.QA_WORK+'/first-lint.log',c=fs.readFileSync(p,'utf8');
           for(const name of ['readonly-sql-lab','sql-lab/page.tsx','integrations/layout.tsx','excel-preview','v6-readonly-mayan-sql-client'])
             console.log('QA_LINT_SOURCE_'+name.replace(/[^a-zA-Z]/g,'_').toUpperCase()+'='+c.includes(name));
-          const rules=[...new Set((c.match(/(?:@typescript-eslint|react-hooks|react|@next\\/next|jsx-a11y)\\/[a-z-]+/g)||[]))].slice(0,10);
-          console.log('QA_LINT_SAFE_RULES='+rules.join(','));
+          const known=['@typescript-eslint/no-unused-vars','@typescript-eslint/no-explicit-any','react/no-unescaped-entities','react-hooks/rules-of-hooks','react-hooks/exhaustive-deps','import/no-unresolved','no-unused-vars'];
+          console.log('QA_LINT_SAFE_RULES='+known.filter(x=>c.includes(x)).join(','));
           NODE
             echo 'QA_PRETEST_LINT_FAILED'
             exit 1
