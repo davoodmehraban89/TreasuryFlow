@@ -24,7 +24,7 @@ jobs:
           if([string]::IsNullOrWhiteSpace($env:TF_VALIDATION_READ_TOKEN)){throw 'PRIVATE_READ_TOKEN_NOT_AVAILABLE'}
           $env:GH_TOKEN=$env:TF_VALIDATION_READ_TOKEN
           $private='davoodmehraban89/TreasuryFlow-Validation-Private'
-          $branch='cfe0e752bede54cac4fbe4e4f62e647abf7ab755'
+          $branch='9ecc2c995c759d3608c8e9ed1b7b1c10b9c2a1f3'
           $work=Join-Path $env:RUNNER_TEMP 'v6-protected-builder'
           New-Item -ItemType Directory -Path $work -Force | Out-Null
           $paths=@('qa/scripts/rebuild-v6-private-nonfinal-qa.ps1',
