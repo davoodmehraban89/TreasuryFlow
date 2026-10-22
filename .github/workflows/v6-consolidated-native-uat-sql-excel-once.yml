@@ -147,6 +147,28 @@ jobs:
                 Where-Object {$allowed -contains $_} | Select-Object -First 30)
               Write-Host ('PRIVATE_QA_SAFE_ERROR_WORDS='+($words -join '_'))
             }
+            $safeAuditFields=@(
+              'PRIVATE_QA_AUDIT_PROCESS_EXIT',
+              'PRIVATE_QA_AUDIT_JSON_PRESENT',
+              'PRIVATE_QA_AUDIT_HAS_METADATA',
+              'PRIVATE_QA_AUDIT_HAS_ERROR_FIELD',
+              'PRIVATE_QA_PRODUCTION_AUDIT_TOTAL',
+              'PRIVATE_QA_PRODUCTION_AUDIT_HIGH',
+              'PRIVATE_QA_PRODUCTION_AUDIT_CRITICAL',
+              'PRIVATE_QA_AUDIT_PUBLIC_VENDOR_NEXT',
+              'PRIVATE_QA_AUDIT_PUBLIC_VENDOR_REACT',
+              'PRIVATE_QA_AUDIT_PUBLIC_VENDOR_XLSX',
+              'PRIVATE_QA_AUDIT_PUBLIC_VENDOR_MSSQL'
+            )
+            foreach($field in $safeAuditFields){
+              $matching=[regex]::Match($record,[regex]::Escape($field)+'=(?:True|False|YES|[0-9]{1,4})')
+              if($matching.Success){Write-Host ('DIAGNOSTIC_'+$matching.Value)}
+            }
+            foreach($reason in @('KNOWN_PRODUCTION_DEPENDENCY_ADVISORIES_REMAIN','PRODUCTION_AUDIT_METADATA_UNAVAILABLE',
+              'PRODUCTION_AUDIT_JSON_PARSE_FAILED','PRODUCTION_AUDIT_PROCESS_NOT_CREATED',
+              'PRODUCTION_AUDIT_NONZERO_WITH_ZERO_DECLARED_ADVISORIES')){
+                Write-Host ('DIAGNOSTIC_AUDIT_REASON_'+$reason+'='+[bool]$record.Contains($reason))
+            }
             $phases=[regex]::Matches($record,'PRIVATE_QA_PHASE=[A-Z_]+')
             $lastPhase=if($phases.Count -gt 0){$phases[$phases.Count-1].Value}else{'PRIVATE_QA_PHASE=BEFORE_ARCHIVE_PREFLIGHT'}
             Write-Host ('DIAGNOSTIC_LAST_VERIFIED_PHASE='+$lastPhase)
