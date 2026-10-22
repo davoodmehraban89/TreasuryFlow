@@ -293,6 +293,21 @@ jobs:
              $uatResult.visitedRoutes.Count -ne 10 -or !$uatResult.syntheticAccount -or
              !$uatResult.syntheticBeneficiary -or !$uatResult.syntheticDraft -or
              !$uatResult.durableData -or !$uatResult.auditPersisted -or !$uatResult.appReopened){
+            $safeError=[string]$uatResult.errorCode
+            $safeTypes=[ordered]@{
+              WAIT_TIMEOUT='(?:CDP_WAIT_TIMEOUT|CDP_TIMEOUT|TIMEOUT)'
+              CDP_EVALUATION='CDP_EVALUATION_ERROR'
+              CDP_WEBSOCKET='(?:CDP_WS_ERROR|CDP_WS_TIMEOUT|CDP_REMOTE_ERROR)'
+              STALE_SERVER='STALE_LOCAL_SERVER_PRESENT'
+              ELECTRON_EXIT='INSTALLED_ELECTRON_EXITED'
+              NO_LOCAL_ENTRY='NATIVE_LOCAL_ENTRY_MISSING'
+              INVALID_TITLE='NATIVE_.*(?:MISSING|NOT_READY)'
+            }
+            foreach($name in $safeTypes.Keys){Write-Host ('UAT_REDACTED_ERROR_'+$name+'='+[bool]($safeError -match $safeTypes[$name]))}
+            Write-Host ('UAT_BROWSER_CDP_CONNECTED='+[bool]$uatResult.cdp)
+            Write-Host ('UAT_BROWSER_DISCOVERY_TRANSIENT_COUNT='+[int]$uatResult.cdpTransientDiscoveryFailures)
+            Write-Host ('UAT_CDP_RECONNECTIONS='+[int]$uatResult.cdpReconnections)
+            Write-Host ('UAT_VISITED_ROUTE_COUNT='+[int]@($uatResult.visitedRoutes).Count)
             throw ('COMBINED_NATIVE_UAT_FAILED_AT_'+([string]$uatResult.stage -replace '[^A-Z0-9_]', ''))
           }
           Write-Host 'GATE_PASS_COMBINED_SAME_INSTALLED_EXE_10ROUTES_3_SYNTHETIC_WRITES_RESTART_AUDIT'
