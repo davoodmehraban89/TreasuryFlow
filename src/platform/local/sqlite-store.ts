@@ -2,6 +2,7 @@ import {mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import type {LocalStoreData,LocalAccount,LocalBeneficiary,LocalPayment,LocalAudit} from '../application/types';
+import {createVerifiedSqliteBackup} from './verified-sqlite-backup';
 
 const empty=():LocalStoreData=>({
   version:1,
@@ -123,6 +124,8 @@ export class SqliteStore{
       throw error;
     }
   }
+
+  backupTo(destination:string){return createVerifiedSqliteBackup(this.db,destination)}
 
   close(){this.db.close()}
 }
