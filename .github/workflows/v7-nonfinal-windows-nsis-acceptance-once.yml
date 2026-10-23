@@ -1,0 +1,110 @@
+name: V7 branch nonfinal NSIS Windows 2022 real installed smoke
+on:
+  push:
+    paths:
+      - .github/workflows/v7-nonfinal-windows-nsis-acceptance-once.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  installed-v7-prototype:
+    runs-on: windows-2022
+    timeout-minutes: 70
+    env:
+      BANK_ADAPTER_MODE: disabled
+      TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ: '0'
+      TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ: '0'
+      TREASURYFLOW_ENABLE_SQL_LAB: '0'
+      NEXT_TELEMETRY_DISABLED: '1'
+      ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install and quality gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          npm ci --ignore-scripts
+          if($LASTEXITCODE -ne 0){throw 'CI_DEPENDENCY_INSTALL_FAILED'}
+          npm test -- --reporter=dot
+          if($LASTEXITCODE -ne 0){throw 'CI_FINANCIAL_UNIT_FAILED'}
+          npm run typecheck
+          if($LASTEXITCODE -ne 0){throw 'CI_TYPESCRIPT_FAILED'}
+          npm run lint
+          if($LASTEXITCODE -ne 0){throw 'CI_LINT_FAILED'}
+          npm audit --omit=dev --audit-level=low
+          if($LASTEXITCODE -ne 0){throw 'CI_PRODUCTION_NPM_ADVISORY'}
+          Write-Host 'GATE_PASS_V7_BRANCH_WINDOWS_TEST_TYPECHECK_LINT_ZERO_PRODUCTION_AUDIT'
+      - name: Build and package nonfinal NSIS installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          npm run build
+          if($LASTEXITCODE -ne 0){throw 'CI_NEXT_BUILD_FAILED'}
+          node scripts/prepare-standalone.mjs
+          if($LASTEXITCODE -ne 0){throw 'CI_STANDALONE_FAILED'}
+          $env:CSC_IDENTITY_AUTO_DISCOVERY='false'
+          & npx.cmd --no-install electron-builder --win nsis --x64 --publish never
+          if($LASTEXITCODE -ne 0){throw 'CI_NONFINAL_NSIS_PACKAGING_FAILED'}
+          $exe=@(Get-ChildItem -LiteralPath (Join-Path $pwd 'release') -File -Filter '*.exe')
+          if($exe.Count -ne 1 -or $exe[0].Length -lt 1000000){throw 'CI_NONFINAL_NSIS_SINGLE_EXE_NOT_FOUND'}
+          Write-Host 'GATE_PASS_NONFINAL_V7_BRANCH_NSIS_BUILT'
+      - name: Install exact NSIS setup and verify desktop on real Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $setup=@(Get-ChildItem -LiteralPath (Join-Path $pwd 'release') -File -Filter '*.exe')
+          if($setup.Count -ne 1){throw 'EXACT_NSIS_SETUP_MISSING'}
+          $install=Join-Path $env:RUNNER_TEMP 'v7-nonfinal-installed'
+          $sandbox=Join-Path $env:RUNNER_TEMP 'v7-nonfinal-data'
+          New-Item -ItemType Directory -Path $sandbox -Force | Out-Null
+          $p=Start-Process -FilePath $setup[0].FullName -ArgumentList @('/S',('/D='+$install)) -PassThru
+          if(!$p.WaitForExit(120000)){try{$p.Kill()}catch{};throw 'NSIS_INSTALL_TIMEOUT'}
+          if($p.ExitCode -ne 0){throw 'NSIS_INSTALL_NONZERO'}
+          $program=@(Get-ChildItem -LiteralPath $install -Recurse -File -Filter 'TreasuryFlow.exe' -ErrorAction SilentlyContinue)
+          if($program.Count -ne 1){throw 'INSTALLED_ELECTRON_PROGRAM_MISSING'}
+          Write-Host 'GATE_PASS_V7_BRANCH_NSIS_SILENT_INSTALL'
+          $env:LOCALAPPDATA=$sandbox
+          $env:TREASURYFLOW_DESKTOP_LOCAL='1'
+          $env:BANK_ADAPTER_MODE='disabled'
+          $desktop=$null
+          try{
+            $desktop=Start-Process -FilePath $program[0].FullName -PassThru
+            $ready=$null
+            for($i=0;$i -lt 100;$i++){
+              try{
+                $ready=Invoke-RestMethod -Uri 'http://127.0.0.1:3210/api/ready' -TimeoutSec 2
+                if($ready.status -eq 'ready' -and $ready.bankAdapter -eq 'disabled'){break}
+              }catch{}
+              Start-Sleep -Milliseconds 600
+            }
+            if($null -eq $ready -or $ready.status -ne 'ready' -or $ready.bankAdapter -ne 'disabled'){
+              throw 'V7_INSTALLED_LOCAL_READINESS_FAILED'
+            }
+            foreach($route in @('/login','/dashboard','/accounts','/payments','/queue','/audit')){
+              $response=Invoke-WebRequest -Uri ('http://127.0.0.1:3210'+$route) -UseBasicParsing -TimeoutSec 12
+              if($response.StatusCode -ne 200){throw 'V7_INSTALLED_NATIVE_ROUTE_HTTP_FAILED'}
+            }
+            Write-Host 'GATE_PASS_V7_BRANCH_REAL_INSTALLED_ELECTRON_READY_SIX_ROUTES_BANK_DISABLED'
+          }finally{
+            if($desktop -and !$desktop.HasExited){& taskkill.exe /PID $desktop.Id /T /F *> $null}
+          }
+          $un=@(Get-ChildItem -LiteralPath $install -Recurse -File -Filter 'Uninstall*.exe' -ErrorAction SilentlyContinue)
+          if($un.Count -ne 1){throw 'NSIS_UNINSTALLER_NOT_FOUND'}
+          $p=Start-Process -FilePath $un[0].FullName -ArgumentList '/S' -PassThru
+          if(!$p.WaitForExit(120000)){try{$p.Kill()}catch{};throw 'NSIS_UNINSTALL_TIMEOUT'}
+          if($p.ExitCode -ne 0){throw 'NSIS_UNINSTALL_NONZERO'}
+          for($i=0;$i -lt 60;$i++){
+            $left=@(Get-ChildItem -LiteralPath $install -Recurse -File -Filter 'TreasuryFlow.exe' -ErrorAction SilentlyContinue)
+            if($left.Count -eq 0){break}
+            Start-Sleep -Milliseconds 700
+          }
+          if($left.Count -ne 0){throw 'NSIS_UNINSTALL_LEFT_EXECUTABLE'}
+          Write-Host 'GATE_PASS_V7_BRANCH_SAME_ARTIFACT_NSIS_UNINSTALL'
+      - name: No releases, artifacts or deployment
+        if: always()
+        run: echo NONFINAL_V7_BRANCH_NO_PRIVATE_SOURCE_NO_CUSTOMER_DATA_NO_PUBLIC_RELEASE_NO_BANK
