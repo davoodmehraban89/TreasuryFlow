@@ -98,7 +98,34 @@ export class TreasuryService{
       state:'DRAFT'
     };
     this.store.update(d=>{
-      if(d.payments.some(x=>x.tenantId===payment.tenantId&&(x.id===payment.id||x.clientReference===payment.clientReference))) throw new Error('duplicate payment reference');
+      // Recheck all financial preconditions against the snapshot acquired *under*
+      // the store write transaction. Preflight reads above can race another
+      // desktop/process writer, particularly across multiple SQLite connections.
+      const accounts=d.accounts.filter(x=>x.tenantId===payment.tenantId);
+      const beneficiaries=d.beneficiaries.filter(x=>x.tenantId===payment.tenantId);
+      const prior=d.payments.filter(x=>x.tenantId===payment.tenantId);
+      if(!accounts.some(x=>x.id===payment.sourceAccountId))throw new Error('source account not found');
+      const currentBeneficiary=beneficiaries.find(x=>x.id===payment.beneficiaryId);
+      if(!currentBeneficiary)throw new Error('beneficiary not found');
+      const normalizedReference=payment.clientReference.toLowerCase();
+      if(prior.some(x=>x.id===payment.id||x.clientReference.trim().toLowerCase()===normalizedReference)){
+        throw new Error('duplicate payment reference');
+      }
+      const currentGuard=evaluatePaymentGuard({
+        sourceAccountId:payment.sourceAccountId,
+        beneficiaryId:payment.beneficiaryId,
+        iban:currentBeneficiary.iban,
+        amountIrr:payment.amountIrr,
+        clientReference:payment.clientReference,
+        paymentDate:payment.paymentDate
+      },prior.map(x=>({
+        sourceAccountId:x.sourceAccountId,beneficiaryId:x.beneficiaryId,
+        iban:beneficiaries.find(b=>b.id===x.beneficiaryId)?.iban??'',
+        amountIrr:x.amountIrr,clientReference:x.clientReference,paymentDate:x.paymentDate
+      })));
+      if(!currentGuard.ok)throw new Error(currentGuard.code==='DUPLICATE_PAYMENT'
+        ? 'duplicate payment' : currentGuard.code==='DUPLICATE_REFERENCE'
+          ? 'duplicate payment reference' : 'invalid Iranian IBAN');
       d.payments.push(payment);
       this.appendAuditTo(d,'PAYMENT_CREATED',payment.id);
       return d;
