@@ -57,3 +57,23 @@ jobs:
       - run: npx vitest run src/platform/local/verified-sqlite-backup.test.ts src/platform/application/treasury-service-concurrent-guard.test.ts src/platform/application/treasury-service-dispatch-reservation.test.ts
       - run: npx vitest run scripts/treasury-sqlite-recovery.test.ts
       - run: echo GATE_PASS_EDGE_WAL_RECOVERY_AND_NO_REPEAT_BANK_DISPATCH
+
+  windows:
+    name: Windows 2022 native SQLite backup and recovery
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Windows native SQLite recovery and CLI negative regressions
+        shell: pwsh
+        run: |
+          & npx.cmd vitest run src/platform/local/verified-sqlite-backup.test.ts scripts/treasury-sqlite-recovery.test.ts
+          if($LASTEXITCODE -ne 0){throw 'WINDOWS_NATIVE_SQLITE_RECOVERY_FAILED'}
+          Write-Host 'GATE_PASS_REAL_WINDOWS_2022_LOCAL_SQLITE_BACKUP_RESTORE_AND_CLI'
