@@ -1,4 +1,4 @@
-import {afterEach,describe,expect,it} from 'vitest';
+import {afterEach,describe,expect,it,vi} from 'vitest';
 import {mkdtempSync,readFileSync,rmSync,writeFileSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -6,6 +6,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {SqliteStore} from './sqlite-store';
 import {restoreVerifiedSqliteBackupToNewPath,verifyTreasurySqliteBackup} from './verified-sqlite-backup';
 import {TreasuryService} from '../application/treasury-service';
+import type {BankAdapter} from '../../domain/bank-adapter';
 
 const dirs:string[]=[];
 const iban='IR062960000000100324200001';
@@ -86,6 +87,59 @@ describe('verified SQLite backup and recovery without operational overwrite',()=
       expect(verifyTreasurySqliteBackup(dest).accounts).toBe(2);
       expect(store.snapshot().accounts).toHaveLength(3);
     }finally{other.close();store.close()}
+  });
+  it('restored UNKNOWN payments remain blocked from bank resubmission',async()=>{
+    const {dir,store,maker}=fixture();
+    maker.submitPayment('payment-1');
+    const checker=new TreasuryService(store,{tenantId:'local',userId:'checker',role:'CHECKER'});
+    checker.approvePayment('payment-1');
+    checker.queuePayment('payment-1');
+    const failedAdapter:BankAdapter={submit:vi.fn().mockRejectedValue(Error('synthetic timeout')),poll:vi.fn()};
+    await expect(checker.dispatchPayment('payment-1',failedAdapter)).rejects.toThrow(/manual review/i);
+    expect(checker.getPayment('payment-1').state).toBe('UNKNOWN');
+    const backup=join(dir,'unknown-backup.sqlite');
+    store.backupTo(backup);
+    const newDb=join(dir,'unknown-restored.sqlite');
+    restoreVerifiedSqliteBackupToNewPath(backup,newDb);
+    const restored=new SqliteStore(newDb);
+    try{
+      const recovered=new TreasuryService(restored,{tenantId:'local',userId:'checker',role:'CHECKER'});
+      expect(recovered.getPayment('payment-1').state).toBe('UNKNOWN');
+      const blocked:BankAdapter={submit:vi.fn(),poll:vi.fn()};
+      await expect(recovered.dispatchPayment('payment-1',blocked)).rejects.toThrow('payment not eligible for dispatch');
+      expect(blocked.submit).not.toHaveBeenCalled();
+      expect(recovered.listAudit().some(a=>a.action==='PAYMENT_BANK_UNKNOWN')).toBe(true);
+    }finally{restored.close();store.close()}
+  });
+  it('restored in-flight DISPATCHING reservation cannot automatically replay a bank transfer',async()=>{
+    const {dir,store,maker}=fixture();
+    maker.submitPayment('payment-1');
+    const checker=new TreasuryService(store,{tenantId:'local',userId:'checker',role:'CHECKER'});
+    checker.approvePayment('payment-1');
+    checker.queuePayment('payment-1');
+    let resolveFirst:(value:{outcome:'ACCEPTED';bankReference:string})=>void=()=>{};
+    const pending=new Promise<{outcome:'ACCEPTED';bankReference:string}>(resolve=>{resolveFirst=resolve});
+    const source:BankAdapter={submit:vi.fn(()=>pending),poll:vi.fn()};
+    const first=checker.dispatchPayment('payment-1',source);
+    expect(checker.getPayment('payment-1').state).toBe('DISPATCHING');
+    const backup=join(dir,'dispatching-backup.sqlite');
+    store.backupTo(backup);
+    const dest=join(dir,'dispatching-restored.sqlite');
+    restoreVerifiedSqliteBackupToNewPath(backup,dest);
+    const restored=new SqliteStore(dest);
+    try{
+      const recovered=new TreasuryService(restored,{tenantId:'local',userId:'checker',role:'CHECKER'});
+      expect(recovered.getPayment('payment-1').state).toBe('DISPATCHING');
+      const blocked:BankAdapter={submit:vi.fn(),poll:vi.fn()};
+      await expect(recovered.dispatchPayment('payment-1',blocked)).rejects.toThrow('payment not eligible for dispatch');
+      expect(blocked.submit).not.toHaveBeenCalled();
+      expect(recovered.listAudit().filter(a=>a.action==='PAYMENT_DISPATCH_RESERVED')).toHaveLength(1);
+    }finally{
+      restored.close();
+      resolveFirst({outcome:'ACCEPTED',bankReference:'SYNTHETIC-ACK'});
+      await first;
+      store.close();
+    }
   });
   it('fails closed on an unexpected schema version without mutating the source',()=>{
     const {dir,file,store}=fixture();
