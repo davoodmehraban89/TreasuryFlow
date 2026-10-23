@@ -1,4 +1,4 @@
-name: V7 branch three independent financial QA jobs
+name: V7 branch three financial QA jobs final regression
 on:
   push:
     paths: [.github/workflows/v7-finance-three-independent-qa-once.yml]
