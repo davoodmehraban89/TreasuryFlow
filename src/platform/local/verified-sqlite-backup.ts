@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
-import {COPYFILE_EXCL,copyFileSync,existsSync,mkdirSync,rmSync} from 'node:fs';
+import {constants as fsConstants,copyFileSync,existsSync,mkdirSync,rmSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 
 const expectedTables=['accounts','audit','beneficiaries','meta','payments'] as const;
@@ -44,7 +44,7 @@ export function createVerifiedSqliteBackup(db:DatabaseSync,destination:string){
   try{
     db.prepare('VACUUM main INTO ?').run(temporary);
     const summary=verifyTreasurySqliteBackup(temporary);
-    copyFileSync(temporary,dest,COPYFILE_EXCL);
+    copyFileSync(temporary,dest,fsConstants.COPYFILE_EXCL);
     createdDestination=true;
     const copied=verifyTreasurySqliteBackup(dest);
     if(JSON.stringify(summary)!==JSON.stringify(copied))throw new Error('SQLITE_BACKUP_VERIFICATION_MISMATCH');
@@ -65,7 +65,7 @@ export function restoreVerifiedSqliteBackupToNewPath(source:string,destination:s
   mkdirSync(dirname(dest),{recursive:true});
   let created=false;
   try{
-    copyFileSync(src,dest,COPYFILE_EXCL);
+    copyFileSync(src,dest,fsConstants.COPYFILE_EXCL);
     created=true;
     const recovered=verifyTreasurySqliteBackup(dest);
     if(JSON.stringify(expected)!==JSON.stringify(recovered))throw new Error('SQLITE_RESTORE_VERIFICATION_MISMATCH');
