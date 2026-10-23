@@ -148,7 +148,7 @@ export class TreasuryService{
       whitelist:new Set(beneficiary?.whitelisted?[`${payment.tenantId}:${payment.beneficiaryId}`]:[])
     });
     if(!policy.allowed) throw new Error(policy.reason);
-    return this.changeState(id,transitionPayment(payment.state,'SUBMIT'),'PAYMENT_SUBMITTED');
+    return this.changeState(id,transitionPayment(payment.state,'SUBMIT'),'PAYMENT_SUBMITTED',payment);
   }
 
   approvePayment(id:string){
@@ -158,6 +158,12 @@ export class TreasuryService{
     return this.store.update(d=>{
       const row=d.payments.find(x=>x.tenantId===this.actor.tenantId&&x.id===id);
       if(!row) throw new Error('payment not found');
+      if(row.state!=='PENDING_APPROVAL'||row.version!==payment.version){
+        throw new Error('payment not pending approval');
+      }
+      if(!canApprove({actorId:this.actor.userId,makerId:row.makerId},row.version)){
+        throw new Error('maker cannot approve own payment');
+      }
       row.state=transitionPayment(row.state,'APPROVE');
       row.approvedVersion=row.version;
       d.audit.push({tenantId:this.actor.tenantId,seq:d.audit.length+1,actor:this.actor.userId,action:'PAYMENT_APPROVED',entity:id,at:Date.now()});
@@ -165,12 +171,21 @@ export class TreasuryService{
     }).payments.find(x=>x.tenantId===this.actor.tenantId&&x.id===id)!;
   }
 
-  private changeState(id:string,state:LocalPayment['state'],action:string){
+  private changeState(id:string,state:LocalPayment['state'],action:string,expected:LocalPayment){
     return this.store.update(d=>{
       const row=d.payments.find(x=>x.tenantId===this.actor.tenantId&&x.id===id);
       if(!row) throw new Error('payment not found');
+      // A state transition from a preflight snapshot must not overwrite a
+      // concurrent approval, bank outcome or revised payment version.
+      if(row.state!==expected.state||row.version!==expected.version){
+        throw new Error('stale payment state');
+      }
+      if(action==='PAYMENT_SUBMITTED'&&row.makerId!==this.actor.userId)throw new Error('forbidden');
+      if(action==='PAYMENT_QUEUED'&&row.approvedVersion!==row.version){
+        throw new Error('payment not eligible for queue');
+      }
       row.state=state;
-      d.audit.push({tenantId:this.actor.tenantId,seq:d.audit.length+1,actor:this.actor.userId,action,entity:id,at:Date.now()});
+      this.appendAuditTo(d,action,id);
       return d;
     }).payments.find(x=>x.tenantId===this.actor.tenantId&&x.id===id)!;
   }
@@ -178,7 +193,7 @@ export class TreasuryService{
   queuePayment(id:string){
     const payment=this.getPayment(id);
     if(payment.state!=='APPROVED'||payment.approvedVersion!==payment.version) throw new Error('payment not eligible for queue');
-    return this.changeState(id,transitionPayment(payment.state,'QUEUE'),'PAYMENT_QUEUED');
+    return this.changeState(id,transitionPayment(payment.state,'QUEUE'),'PAYMENT_QUEUED',payment);
   }
 
   async dispatchPayment(id:string,adapter:BankAdapter){
@@ -208,8 +223,8 @@ export class TreasuryService{
       this.appendAudit('PAYMENT_BANK_'+outcome,id);
       return this.getPayment(id);
     }
-    if(outcome==='REJECTED') return this.changeState(id,transitionPayment(payment.state,'FAIL'),'PAYMENT_BANK_REJECTED');
-    return this.changeState(id,transitionPayment(payment.state,'UNKNOWN_RESULT'),'PAYMENT_BANK_UNKNOWN');
+    if(outcome==='REJECTED') return this.changeState(id,transitionPayment(payment.state,'FAIL'),'PAYMENT_BANK_REJECTED',payment);
+    return this.changeState(id,transitionPayment(payment.state,'UNKNOWN_RESULT'),'PAYMENT_BANK_UNKNOWN',payment);
   }
 
   getDashboard(){return dashboard(this.actor.tenantId,this.listPayments())}
