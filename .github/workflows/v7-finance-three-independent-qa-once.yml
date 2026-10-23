@@ -1,0 +1,53 @@
+name: V7 branch three independent financial QA jobs
+on:
+  push:
+    paths: [.github/workflows/v7-finance-three-independent-qa-once.yml]
+permissions:
+  contents: read
+jobs:
+  functional:
+    name: Functional finance regression
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run smoke
+      - run: echo GATE_PASS_FUNCTIONAL_FINANCIAL_QA_ALL_APPLICATION_TESTS
+  security:
+    name: Security and role policy
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: npm audit --omit=dev --audit-level=low
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx --no-install vitest run src/platform/application/treasury-service-role-boundaries.test.ts src/platform/application/treasury-service-dispatch-reservation.test.ts
+      - run: node qa/scripts/production-http-security.mjs
+      - run: echo GATE_PASS_SECURITY_ROLE_DISPATCH_AND_FORGED_ACCESS_CASES
+  edge:
+    name: Transaction and concurrency misuse
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: npx --no-install vitest run src/platform/application/treasury-service-atomic-audit.test.ts src/platform/application/treasury-service-concurrent-guard.test.ts src/platform/application/treasury-service-stale-transition.test.ts src/platform/application/treasury-service-dispatch-reservation.test.ts
+      - run: node qa/scripts/production-http-edge-cases.mjs
+      - run: echo GATE_PASS_EDGE_ROLLBACK_SQLITE_AND_NO_DUPLICATE_DISPATCH
