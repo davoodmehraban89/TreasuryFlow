@@ -73,9 +73,15 @@ jobs:
           $env:BANK_ADAPTER_MODE='disabled'
           $desktop=$null
           try{
-            $desktop=Start-Process -FilePath $program[0].FullName -PassThru
+            $diagnosticError=Join-Path $env:RUNNER_TEMP 'nonfinal-electron-error.txt'
+            $diagnosticOut=Join-Path $env:RUNNER_TEMP 'nonfinal-electron-out.txt'
+            $serverMain=Join-Path $install 'resources/standalone/server.js'
+            $nextRuntime=Join-Path $install 'resources/standalone/node_modules/next/package.json'
+            Write-Host ('V7_PACKAGED_STANDALONE_SERVER_PRESENT='+[bool](Test-Path -LiteralPath $serverMain))
+            Write-Host ('V7_PACKAGED_NEXT_RUNTIME_PRESENT='+[bool](Test-Path -LiteralPath $nextRuntime))
+            $desktop=Start-Process -FilePath $program[0].FullName -PassThru -RedirectStandardError $diagnosticError -RedirectStandardOutput $diagnosticOut
             $ready=$null
-            for($i=0;$i -lt 100;$i++){
+            for($i=0;$i -lt 40;$i++){
               try{
                 $ready=Invoke-RestMethod -Uri 'http://127.0.0.1:3210/api/ready' -TimeoutSec 2
                 if($ready.status -eq 'ready' -and $ready.bankAdapter -eq 'disabled'){break}
@@ -83,6 +89,14 @@ jobs:
               Start-Sleep -Milliseconds 600
             }
             if($null -eq $ready -or $ready.status -ne 'ready' -or $ready.bankAdapter -ne 'disabled'){
+              Write-Host ('V7_ELECTRON_PROCESS_EXITED='+[bool]$desktop.HasExited)
+              $listening=@(Get-NetTCPConnection -LocalPort 3210 -State Listen -ErrorAction SilentlyContinue)
+              Write-Host ('V7_LOCAL_3210_LISTENING='+[bool]($listening.Count -gt 0))
+              $stdErrText=if(Test-Path -LiteralPath $diagnosticError){Get-Content -LiteralPath $diagnosticError -Raw -ErrorAction SilentlyContinue}else{''}
+              foreach($pattern in @('Server exited','MODULE_NOT_FOUND','Cannot find module','ERR_REQUIRE_ESM',
+                'EADDRINUSE','node:sqlite','ERR_UNKNOWN_BUILTIN_MODULE','Cannot read properties')){
+                Write-Host ('V7_SAFE_ERROR_CLASS_'+($pattern -replace '[^A-Za-z]','_').ToUpperInvariant()+'='+[bool]($stdErrText.Contains($pattern)))
+              }
               throw 'V7_INSTALLED_LOCAL_READINESS_FAILED'
             }
             foreach($route in @('/login','/dashboard','/accounts','/payments','/queue','/audit')){
