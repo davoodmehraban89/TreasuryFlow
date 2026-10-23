@@ -16,7 +16,7 @@ node --experimental-strip-types scripts/treasury-sqlite-recovery.mjs verify /sec
 node --experimental-strip-types scripts/treasury-sqlite-recovery.mjs restore-new /secure/new-backup.sqlite /path/to/new-recovery.sqlite
 ```
 
-The backup uses SQLite `VACUUM INTO` for a consistent committed snapshot, even when the source has WAL activity. It validates `PRAGMA integrity_check`, required schema tables and exact schema version. The destination is created exclusively: **an existing file, including a zero-byte file, is never overwritten**. Restore works **only to a new filename** and does not modify the active database.
+The backup uses SQLite `VACUUM INTO` for a consistent committed snapshot, even when the source has WAL activity. It validates `PRAGMA integrity_check`, required schema tables, exact schema version and financial amounts within JavaScript's precisely representable integer range. A legacy 64-bit SQLite amount that exceeds this limit is **rejected**, not silently rounded. The destination is created exclusively: **an existing file, including a zero-byte file, is never overwritten**. Restore works **only to a new filename** and does not modify the active database.
 
 ## Operational handover / rollback
 1. Capture and verify a protected backup; record its SHA-256 in private release records.
