@@ -5,8 +5,8 @@ import {approvePaymentAction,submitPaymentAction} from '../payment-actions';
 
 export const dynamic='force-dynamic';
 
-const steps=['DRAFT','PENDING_APPROVAL','APPROVED','QUEUED','SUBMITTED','SETTLED'];
-const label:Record<string,string>={DRAFT:'پیش‌نویس',PENDING_APPROVAL:'در انتظار تأیید',APPROVED:'تأییدشده',QUEUED:'در صف ارسال',SUBMITTED:'ارسال‌شده',SETTLED:'تسویه‌شده'};
+const steps=['DRAFT','PENDING_APPROVAL','APPROVED','QUEUED','DISPATCHING','SUBMITTED','SETTLED'];
+const label:Record<string,string>={DRAFT:'پیش‌نویس',PENDING_APPROVAL:'در انتظار تأیید',APPROVED:'تأییدشده',QUEUED:'در صف ارسال',DISPATCHING:'در انتظار نتیجه بانک',SUBMITTED:'ارسال‌شده',SETTLED:'تسویه‌شده'};
 
 export default async function PaymentDetailPage({params}:{params:Promise<{id:string}>}){
   const {id}=await params;
@@ -21,7 +21,7 @@ export default async function PaymentDetailPage({params}:{params:Promise<{id:str
       <article className="panel"><div className="section-title"><div><h3>مشخصات حواله</h3><p>اطلاعات ثبت‌شده و وضعیت فعلی</p></div><PaymentStatus state={payment.state}/></div>
         <dl className="detail-list"><div><dt>مبلغ</dt><dd>{payment.amountIrr.toLocaleString('fa-IR')} ریال</dd></div><div><dt>حساب مبدأ</dt><dd>{account?.name??'—'}<small>{account?.iban}</small></dd></div><div><dt>ذی‌نفع</dt><dd>{beneficiary?.name??'—'}<small>{beneficiary?.iban}</small></dd></div><div><dt>تاریخ پرداخت</dt><dd>{payment.paymentDate}</dd></div><div><dt>شرح</dt><dd>{payment.description||'—'}</dd></div><div><dt>ثبت‌کننده</dt><dd>{payment.makerId}</dd></div></dl>
       </article>
-      <article className="panel"><div className="section-title"><div><h3>چرخه حواله</h3><p>مسیر کنترل‌شده از ثبت تا تسویه</p></div></div><ol className="timeline">{steps.map((s,i)=><li key={s} className={i<currentIndex?'done':i===currentIndex?'current':''}><i/><div><strong>{label[s]}</strong><span>{i===currentIndex?'وضعیت فعلی':i<currentIndex?'تکمیل‌شده':'در انتظار'}</span></div></li>)}</ol>{['UNKNOWN','NEEDS_REVIEW','FAILED'].includes(payment.state)&&<div className="alert-banner warning"><strong>این حواله نیازمند بررسی دستی است.</strong><span>هیچ موفقیت یا ارسال مجدد خودکاری برای نتیجه نامعلوم انجام نمی‌شود.</span></div>}</article>
+      <article className="panel"><div className="section-title"><div><h3>چرخه حواله</h3><p>مسیر کنترل‌شده از ثبت تا تسویه</p></div></div><ol className="timeline">{steps.map((s,i)=><li key={s} className={i<currentIndex?'done':i===currentIndex?'current':''}><i/><div><strong>{label[s]}</strong><span>{i===currentIndex?'وضعیت فعلی':i<currentIndex?'تکمیل‌شده':'در انتظار'}</span></div></li>)}</ol>{['DISPATCHING','UNKNOWN','NEEDS_REVIEW','FAILED'].includes(payment.state)&&<div className="alert-banner warning"><strong>این حواله نیازمند بررسی دستی است.</strong><span>هیچ موفقیت یا ارسال مجدد خودکاری برای نتیجه نامعلوم انجام نمی‌شود.</span></div>}</article>
     </section>
   </div>
 }
