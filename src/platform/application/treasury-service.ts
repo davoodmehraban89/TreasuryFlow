@@ -8,7 +8,7 @@ import {BankDispatchRegistry} from '../../domain/bank-adapter';
 import {validateIranianIban} from '../../domain/iran/iban';
 import {evaluatePaymentGuard} from '../../domain/payments/payment-guard';
 import type {TreasuryStore} from './store';
-import type {ActorContext,LocalAccount,LocalAudit,LocalBeneficiary,LocalPayment} from './types';
+import type {ActorContext,LocalAccount,LocalAudit,LocalBeneficiary,LocalPayment,LocalStoreData} from './types';
 
 export class TreasuryService{
   constructor(private readonly store:TreasuryStore,private readonly actor:ActorContext){}
@@ -17,18 +17,18 @@ export class TreasuryService{
     return rows.filter(x=>x.tenantId===this.actor.tenantId);
   }
 
-  private appendAudit(action:string,entity:string){
-    this.store.update(d=>{
-      d.audit.push({
-        tenantId:this.actor.tenantId,
-        seq:d.audit.length+1,
-        actor:this.actor.userId,
-        action,
-        entity,
-        at:Date.now()
-      });
-      return d;
+  /** Append audit into the same store transaction as its financial mutation. */
+  private appendAuditTo(d:LocalStoreData,action:string,entity:string){
+    d.audit.push({
+      tenantId:this.actor.tenantId,
+      seq:d.audit.length+1,
+      actor:this.actor.userId,
+      action,entity,at:Date.now()
     });
+  }
+
+  private appendAudit(action:string,entity:string){
+    this.store.update(d=>{this.appendAuditTo(d,action,entity);return d;});
   }
 
   listAccounts(){return this.own(this.store.snapshot().accounts)}
@@ -56,9 +56,9 @@ export class TreasuryService{
     this.store.update(d=>{
       if(d.accounts.some(x=>x.tenantId===account.tenantId&&x.id===account.id)) throw new Error('duplicate account');
       d.accounts.push(account);
+      this.appendAuditTo(d,'ACCOUNT_CREATED',account.id);
       return d;
     });
-    this.appendAudit('ACCOUNT_CREATED',account.id);
     return account;
   }
 
@@ -74,9 +74,9 @@ export class TreasuryService{
     this.store.update(d=>{
       if(d.beneficiaries.some(x=>x.tenantId===beneficiary.tenantId&&x.id===beneficiary.id)) throw new Error('duplicate beneficiary');
       d.beneficiaries.push(beneficiary);
+      this.appendAuditTo(d,'BENEFICIARY_CREATED',beneficiary.id);
       return d;
     });
-    this.appendAudit('BENEFICIARY_CREATED',beneficiary.id);
     return beneficiary;
   }
 
@@ -100,9 +100,9 @@ export class TreasuryService{
     this.store.update(d=>{
       if(d.payments.some(x=>x.tenantId===payment.tenantId&&(x.id===payment.id||x.clientReference===payment.clientReference))) throw new Error('duplicate payment reference');
       d.payments.push(payment);
+      this.appendAuditTo(d,'PAYMENT_CREATED',payment.id);
       return d;
     });
-    this.appendAudit('PAYMENT_CREATED',payment.id);
     return payment;
   }
 
