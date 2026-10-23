@@ -35,3 +35,9 @@ The backup uses SQLite `VACUUM INTO` for a consistent committed snapshot, even w
 See `src/platform/local/verified-sqlite-backup.test.ts` and `scripts/treasury-sqlite-recovery.test.ts` for normal, WAL, corruption, version, no-overwrite and operator command regressions. Verified in real three-job independent hosted CI [run 39945850403](https://github.com/davoodmehraban89/TreasuryFlow/actions/runs/39945850403), all **PASS**: full finance suite, strict typecheck, lint, Next build, smoke, production-only dependency audit 0, local WAL backup/restore and CLI normal/edge/failure tests. The preceding [run 39945245100](https://github.com/davoodmehraban89/TreasuryFlow/actions/runs/39945245100) uncovered a TypeScript error in the `fs` exclusive-copy constant; it was repaired and all three jobs were rerun. These are three separate CI processes, **not** three autonomous AI review agents.
 
 This proves the local test contract only. It does not prove a Windows V7 installer, real Mayan database integration, authorized bank UAT or production recovery RPO/RTO.
+
+## Cross-platform rerun after financial-state recovery checks
+
+[Run 39946900552](https://github.com/davoodmehraban89/TreasuryFlow/actions/runs/39946900552): **all four independently hosted jobs PASS**, including a real Windows Server 2022 job. The regression additionally recovers payments in `UNKNOWN` and in-flight `DISPATCHING` states from a verified backup and confirms the recovered instance cannot re-submit them automatically. Full financial suite, backup operator CLI, TypeScript, ESLint, build, smoke, production audit, corruption and no-overwrite assertions are included.
+
+This remains a synthetic local rehearsal, not an actual production recovery, a V7 upgrade/rollback, or proof of a production RPO/RTO.
