@@ -1,0 +1,74 @@
+name: V7 branch-only Next security refresh and production audit
+on:
+  push:
+    paths:
+      - .github/workflows/v7-dependency-security-refresh-once.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  update-dependencies:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          ref: dev/v7-production-failclosed-20261021
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Rebuild lockfile using pinned Next security version
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'dev/v7-production-failclosed-20261021'
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));
+          if(pkg.dependencies.next!=='16.3.8'||pkg.devDependencies['eslint-config-next']!=='16.3.8'){
+            throw Error('UNEXPECTED_NEXT_BASELINE_REFUSE');
+          }
+          NODE
+          npm ci --ignore-scripts --no-audit --no-fund >/tmp/tf-next-initial-npm.log 2>&1
+          npm install --save-exact --ignore-scripts --no-fund --no-audit next@16.4.1 >/tmp/tf-next-pinned.log 2>&1
+          npm install --save-dev --save-exact --ignore-scripts --no-fund --no-audit eslint-config-next@16.4.1 >/tmp/tf-eslint-pinned.log 2>&1
+          npm ci --ignore-scripts --no-audit --no-fund >/tmp/tf-next-reproducible-npm.log 2>&1
+          node - <<'NODE'
+          const fs=require('node:fs'),p=JSON.parse(fs.readFileSync('package.json','utf8'));
+          if(p.dependencies.next!=='16.4.1'||p.devDependencies['eslint-config-next']!=='16.4.1')
+            throw Error('EXACT_NEXT_SECURITY_VERSIONS_NOT_APPLIED');
+          console.log('GATE_PASS_EXACT_NEXT_16_4_1_AND_ESLINT_COMPANION');
+          NODE
+      - name: Verify application, security and no additional lockfile changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm audit --omit=dev --audit-level=low >/tmp/tf-next-audit.log 2>&1 || {
+            echo 'GATE_FAIL_PRODUCTION_SECURITY_ADVISORIES_PRESENT'
+            exit 1
+          }
+          echo 'GATE_PASS_PRODUCTION_NPM_AUDIT_ZERO'
+          npm run typecheck
+          npm test
+          npm run lint
+          npm run build
+          npm run smoke
+          echo 'GATE_PASS_V7_BRANCH_BUILD_TEST_LINT_SMOKE'
+          changed=$(git diff --name-only)
+          if [ "$changed" != "$(printf 'package-lock.json\npackage.json')" ]; then
+            echo 'GATE_FAIL_UNEXPECTED_CHANGED_FILES'
+            exit 1
+          fi
+      - name: Persist only reviewed package manifest and lock on V7 branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = 'dev/v7-production-failclosed-20261021'
+          git config user.name 'treasuryflow-security-bot'
+          git config user.email 'security-bot@users.noreply.github.com'
+          git add -- package.json package-lock.json
+          git diff --cached --check
+          git commit -m 'fix(security): pin Next.js and ESLint configuration to 16.4.1 on isolated V7 branch'
+          git push origin HEAD:refs/heads/dev/v7-production-failclosed-20261021
+          echo 'GATE_PASS_V7_PUBLIC_FEATURE_BRANCH_DEPENDENCIES_UPDATED_ONLY'
