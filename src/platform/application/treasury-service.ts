@@ -152,6 +152,7 @@ export class TreasuryService{
   }
 
   approvePayment(id:string){
+    if(this.actor.role!=='CHECKER')throw new Error('checker role required');
     const payment=this.getPayment(id);
     if(!canApprove({actorId:this.actor.userId,makerId:payment.makerId},payment.version)) throw new Error('maker cannot approve own payment');
     if(payment.state!=='PENDING_APPROVAL') throw new Error('payment not pending approval');
@@ -191,12 +192,14 @@ export class TreasuryService{
   }
 
   queuePayment(id:string){
+    if(this.actor.role!=='CHECKER'&&this.actor.role!=='TREASURY_ADMIN')throw new Error('checker or admin role required');
     const payment=this.getPayment(id);
     if(payment.state!=='APPROVED'||payment.approvedVersion!==payment.version) throw new Error('payment not eligible for queue');
     return this.changeState(id,transitionPayment(payment.state,'QUEUE'),'PAYMENT_QUEUED',payment);
   }
 
   async dispatchPayment(id:string,adapter:BankAdapter){
+    if(this.actor.role!=='CHECKER'&&this.actor.role!=='TREASURY_ADMIN')throw new Error('checker or admin role required');
     // Reserve once in durable storage BEFORE any external bank request.
     // The QUEUED -> DISPATCHING transition is atomic across SQLite writers.
     // A crash at any point leaves DISPATCHING/UNKNOWN for manual reconciliation;
@@ -245,6 +248,7 @@ export class TreasuryService{
   }
 
   async pollPaymentStatus(id:string,adapter:BankAdapter){
+    if(this.actor.role!=='CHECKER'&&this.actor.role!=='TREASURY_ADMIN')throw new Error('checker or admin role required');
     const payment=this.getPayment(id);
     if(payment.state!=='SUBMITTED'||!payment.bankReference) throw new Error('payment not eligible for polling');
     const outcome=await adapter.poll(payment.bankReference);
