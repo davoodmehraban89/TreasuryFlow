@@ -32,4 +32,6 @@ The backup uses SQLite `VACUUM INTO` for a consistent committed snapshot, even w
 - Corrupt, unsupported-schema and existing-target cases fail closed, with no operational file replacement.
 
 ## Test acceptance
-See `src/platform/local/verified-sqlite-backup.test.ts` and `scripts/treasury-sqlite-recovery.test.ts` for normal, WAL, corruption, version, no-overwrite and operator command regressions. Final release status depends on current CI results, not the existence of these files.
+See `src/platform/local/verified-sqlite-backup.test.ts` and `scripts/treasury-sqlite-recovery.test.ts` for normal, WAL, corruption, version, no-overwrite and operator command regressions. Verified in real three-job independent hosted CI [run 39945850403](https://github.com/davoodmehraban89/TreasuryFlow/actions/runs/39945850403), all **PASS**: full finance suite, strict typecheck, lint, Next build, smoke, production-only dependency audit 0, local WAL backup/restore and CLI normal/edge/failure tests. The preceding [run 39945245100](https://github.com/davoodmehraban89/TreasuryFlow/actions/runs/39945245100) uncovered a TypeScript error in the `fs` exclusive-copy constant; it was repaired and all three jobs were rerun. These are three separate CI processes, **not** three autonomous AI review agents.
+
+This proves the local test contract only. It does not prove a Windows V7 installer, real Mayan database integration, authorized bank UAT or production recovery RPO/RTO.
