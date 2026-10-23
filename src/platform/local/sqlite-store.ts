@@ -99,10 +99,13 @@ export class SqliteStore{
   }
 
   update(mutator:(data:LocalStoreData)=>LocalStoreData){
-    const next=mutator(structuredClone(this.snapshot()));
-    if(next.version!==1) throw new Error('unsupported sqlite schema version');
+    // Acquire the write lock before reading the snapshot. Otherwise another
+    // connection can commit between snapshot() and BEGIN IMMEDIATE, causing
+    // lost payments or audit rows when the rewritten tables are committed.
     this.db.exec('BEGIN IMMEDIATE');
     try{
+      const next=mutator(structuredClone(this.snapshot()));
+      if(next.version!==1) throw new Error('unsupported sqlite schema version');
       this.db.prepare("UPDATE meta SET value=? WHERE key='organization_name'").run(next.meta.organizationName);
       this.db.exec('DELETE FROM audit; DELETE FROM payments; DELETE FROM beneficiaries; DELETE FROM accounts;');
       const accountStmt=this.db.prepare('INSERT INTO accounts(id,tenant_id,name,iban,bank_name,status) VALUES(?,?,?,?,?,?)');
@@ -114,11 +117,11 @@ export class SqliteStore{
       const auditStmt=this.db.prepare('INSERT INTO audit(tenant_id,seq,actor,action,entity,at) VALUES(?,?,?,?,?,?)');
       for(const a of next.audit) auditStmt.run(a.tenantId,a.seq,a.actor,a.action,a.entity,a.at);
       this.db.exec('COMMIT');
+      return structuredClone(next);
     }catch(error){
       this.db.exec('ROLLBACK');
       throw error;
     }
-    return structuredClone(next);
   }
 
   close(){this.db.close()}
