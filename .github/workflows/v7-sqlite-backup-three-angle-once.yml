@@ -24,7 +24,7 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm run smoke
-      - run: echo GATE_PASS_FULL_FINANCE_RECOVERY_FUNCTIONAL
+      - run: echo GATE_PASS_FULL_FINANCE_RECOVERY_FUNCTIONAL_AND_TYPECHECK
   security:
     name: Code security and backup integrity QA
     runs-on: ubuntu-22.04
