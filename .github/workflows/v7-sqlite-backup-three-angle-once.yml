@@ -56,7 +56,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npx vitest run src/platform/local/verified-sqlite-backup.test.ts src/platform/application/treasury-service-concurrent-guard.test.ts src/platform/application/treasury-service-dispatch-reservation.test.ts
       - run: npx vitest run scripts/treasury-sqlite-recovery.test.ts
-      - run: echo GATE_PASS_EDGE_WAL_RECOVERY_AND_NO_REPEAT_BANK_DISPATCH
+      - run: echo GATE_PASS_EDGE_WAL_UNKNOWN_DISPATCHING_RECOVERY_NO_REPEAT_BANK_DISPATCH
 
   windows:
     name: Windows 2022 native SQLite backup and recovery
