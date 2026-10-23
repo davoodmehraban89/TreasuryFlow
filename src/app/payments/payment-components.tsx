@@ -30,6 +30,7 @@ const stateFa:Record<string,string>={
   PENDING_APPROVAL:'در انتظار تأیید',
   APPROVED:'تأییدشده',
   QUEUED:'در صف ارسال',
+  DISPATCHING:'در حال بررسی نتیجه ارسال',
   SUBMITTED:'ارسال‌شده',
   SETTLED:'تسویه‌شده',
   FAILED:'ناموفق',
