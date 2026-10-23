@@ -20,6 +20,11 @@ export function verifyTreasurySqliteBackup(file:string){
     }
     const row=db.prepare("SELECT value FROM meta WHERE key='schema_version'").get() as {value?:string}|undefined;
     if(row?.value!=='1')throw new Error('SQLITE_BACKUP_UNSUPPORTED_SCHEMA');
+    // The desktop finance domain represents IRR as safe integer Number.
+    // SQLite can store 64-bit amounts exceeding that representable range.
+    const unsafeAmount=db.prepare('SELECT 1 AS invalid FROM payments WHERE amount_irr < 1 OR amount_irr > ? LIMIT 1')
+      .get(Number.MAX_SAFE_INTEGER);
+    if(unsafeAmount)throw new Error('SQLITE_BACKUP_FINANCIAL_AMOUNT_OUT_OF_SAFE_RANGE');
     return {
       schemaVersion:1,
       accounts:Number((db.prepare('SELECT COUNT(*) AS count FROM accounts').get() as {count:number}).count),
