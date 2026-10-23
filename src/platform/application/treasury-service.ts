@@ -197,20 +197,49 @@ export class TreasuryService{
   }
 
   async dispatchPayment(id:string,adapter:BankAdapter){
-    const payment=this.getPayment(id);
-    if(payment.state!=='QUEUED'||payment.approvedVersion!==payment.version) throw new Error('payment not eligible for dispatch');
+    // Reserve once in durable storage BEFORE any external bank request.
+    // The QUEUED -> DISPATCHING transition is atomic across SQLite writers.
+    // A crash at any point leaves DISPATCHING/UNKNOWN for manual reconciliation;
+    // neither state is eligible for automatic re-dispatch.
+    const reserved=this.store.update(d=>{
+      const row=d.payments.find(x=>x.tenantId===this.actor.tenantId&&x.id===id);
+      if(!row||row.state!=='QUEUED'||row.approvedVersion!==row.version){
+        throw new Error('payment not eligible for dispatch');
+      }
+      row.state=transitionPayment(row.state,'BEGIN_DISPATCH');
+      this.appendAuditTo(d,'PAYMENT_DISPATCH_RESERVED',id);
+      return d;
+    }).payments.find(x=>x.tenantId===this.actor.tenantId&&x.id===id)!;
     const registry=new BankDispatchRegistry();
-    const dispatch=registry.begin({tenantId:payment.tenantId,paymentId:payment.id,version:payment.version});
-    const result=await adapter.submit({tenantId:payment.tenantId,paymentId:payment.id,version:payment.version,idempotencyKey:dispatch.idempotencyKey});
-    registry.record(dispatch.idempotencyKey,result.outcome);
+    const dispatch=registry.begin({tenantId:reserved.tenantId,paymentId:reserved.id,version:reserved.version});
+    let result:Awaited<ReturnType<BankAdapter['submit']>>;
+    try{
+      result=await adapter.submit({tenantId:reserved.tenantId,paymentId:reserved.id,
+        version:reserved.version,idempotencyKey:dispatch.idempotencyKey});
+      registry.record(dispatch.idempotencyKey,result.outcome);
+    }catch{
+      // The bank might have accepted the request before the transport failed.
+      // Conservatively mark UNKNOWN rather than rolling back to QUEUED.
+      this.store.update(d=>{
+        const row=d.payments.find(x=>x.tenantId===this.actor.tenantId&&x.id===id);
+        if(!row)throw new Error('payment not found');
+        if(row.state==='DISPATCHING'&&row.version===reserved.version){
+          row.state=transitionPayment(row.state,'UNKNOWN_RESULT');
+          this.appendAuditTo(d,'PAYMENT_BANK_UNKNOWN',id);
+        }
+        return d;
+      });
+      throw new Error('bank dispatch outcome unknown: manual review required');
+    }
     return this.store.update(d=>{
       const row=d.payments.find(x=>x.tenantId===this.actor.tenantId&&x.id===id);
-      if(!row) throw new Error('payment not found');
-      row.state=transitionPayment(row.state,'DISPATCH');
+      if(!row||row.state!=='DISPATCHING'||row.version!==reserved.version){
+        throw new Error('stale dispatch reservation: manual review required');
+      }
+      row.state=transitionPayment(row.state,result.outcome==='REJECTED'?'FAIL'
+        :result.outcome==='UNKNOWN'?'UNKNOWN_RESULT':'DISPATCH');
       row.bankReference=result.bankReference;
-      if(result.outcome==='REJECTED') row.state=transitionPayment(row.state,'FAIL');
-      else if(result.outcome==='UNKNOWN') row.state=transitionPayment(row.state,'UNKNOWN_RESULT');
-      d.audit.push({tenantId:this.actor.tenantId,seq:d.audit.length+1,actor:this.actor.userId,action:'PAYMENT_BANK_'+result.outcome,entity:id,at:Date.now()});
+      this.appendAuditTo(d,'PAYMENT_BANK_'+result.outcome,id);
       return d;
     }).payments.find(x=>x.tenantId===this.actor.tenantId&&x.id===id)!;
   }
