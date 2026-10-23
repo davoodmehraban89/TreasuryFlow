@@ -38,6 +38,7 @@ jobs:
           node-version: '22'
       - run: npm ci --ignore-scripts
       - run: npm run typecheck && npm run lint
+      - run: npx --no-install vitest run src/platform/application/treasury-service-atomic-audit.test.ts
       - run: npm run build
       - run: node qa/scripts/production-http-security.mjs
       - run: echo GATE_PASS_SECURITY_SPOOF_AND_UNAUTHORIZED_WRITES
@@ -54,6 +55,7 @@ jobs:
           node-version: '22'
       - run: npm ci --ignore-scripts
       - run: npm run build
+      - run: npx --no-install vitest run src/platform/application/treasury-service-atomic-audit.test.ts
       - run: node qa/scripts/production-http-edge-cases.mjs
       - run: echo GATE_PASS_EDGE_CASE_QA_UNUSUAL_URLS
       - run: echo GATE_PASS_SECOND_REVIEW_WITH_LIVE_BANK_CONFIG_FAIL_CLOSED_UNIT_TESTS
