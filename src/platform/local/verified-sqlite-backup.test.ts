@@ -141,6 +141,20 @@ describe('verified SQLite backup and recovery without operational overwrite',()=
       store.close();
     }
   });
+  it('rejects legacy SQLite financial amounts that lose Number precision',()=>{
+    const {dir,file,store}=fixture();
+    const backup=join(dir,'large-int.sqlite');
+    store.backupTo(backup);
+    const db=new DatabaseSync(backup);
+    db.prepare('UPDATE payments SET amount_irr=? WHERE id=?').run(9007199254740992n,'payment-1');
+    db.close();
+    expect(()=>verifyTreasurySqliteBackup(backup)).toThrow('SQLITE_BACKUP_FINANCIAL_AMOUNT_OUT_OF_SAFE_RANGE');
+    const target=join(dir,'must-not-restore-unsafe.sqlite');
+    expect(()=>restoreVerifiedSqliteBackupToNewPath(backup,target)).toThrow('SQLITE_BACKUP_FINANCIAL_AMOUNT_OUT_OF_SAFE_RANGE');
+    expect(existsSync(target)).toBe(false);
+    expect(verifyTreasurySqliteBackup(file).payments).toBe(1);
+    store.close();
+  });
   it('fails closed on an unexpected schema version without mutating the source',()=>{
     const {dir,file,store}=fixture();
     const backup=join(dir,'bad-version.sqlite');
