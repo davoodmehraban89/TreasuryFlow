@@ -15,7 +15,7 @@ jobs:
           node-version: '22'
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
-      - run: npx --no-install vitest run src/platform/application/treasury-service-concurrent-guard.test.ts src/platform/application/treasury-service-atomic-audit.test.ts src/platform/application/treasury-service-stale-transition.test.ts src/platform/application/treasury-service-dispatch-reservation.test.ts
+      - run: npx --no-install vitest run src/platform/application/treasury-service-concurrent-guard.test.ts src/platform/application/treasury-service-atomic-audit.test.ts src/platform/application/treasury-service-stale-transition.test.ts src/platform/application/treasury-service-dispatch-reservation.test.ts src/platform/application/treasury-service-role-boundaries.test.ts
       - run: npm run lint
       - run: npm run build
       - run: echo GATE_PASS_FINANCIAL_TRANSACTIONS_ATOMICITY_AND_RACE_GUARDS
