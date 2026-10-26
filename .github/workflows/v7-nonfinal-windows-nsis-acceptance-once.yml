@@ -147,6 +147,21 @@ jobs:
           }finally{
             if($desktop -and !$desktop.HasExited){& taskkill.exe /PID $desktop.Id /T /F *> $null}
           }
+          # Independently test the real installed Electron renderer and CDP
+          # with isolated synthetic local database and no external bank access.
+          $nativeTest=Join-Path $pwd 'qa/windows/v7-installed-native-cdp-smoke.mjs'
+          & node --check $nativeTest
+          if($LASTEXITCODE -ne 0){throw 'NATIVE_ELECTRON_CDP_TEST_SCRIPT_SYNTAX_FAILED'}
+          $nativeData=Join-Path $env:RUNNER_TEMP 'v7-native-cdp-synthetic'
+          New-Item -ItemType Directory -Path $nativeData -Force | Out-Null
+          & node $nativeTest $program[0].FullName $nativeData
+          if($LASTEXITCODE -ne 0){throw 'REAL_INSTALLED_ELECTRON_CDP_UI_ACCEPTANCE_FAILED'}
+          $nativeResult=Get-Content -LiteralPath (Join-Path $nativeData 'v7-native-cdp-qa.json') -Raw | ConvertFrom-Json
+          if($nativeResult.status -ne 'PASS' -or $nativeResult.pages.Count -ne 5 -or
+             !$nativeResult.actualLocalClick -or !$nativeResult.bankDisabled -or !$nativeResult.screenshot){
+            throw 'REAL_INSTALLED_ELECTRON_CDP_ASSERTIONS_NOT_ALL_VERIFIED'
+          }
+          Write-Host 'GATE_PASS_SAME_INSTALLED_V7_NONFINAL_NATIVE_ELECTRON_CDP_LOGIN_FIVE_ROUTES_SCREENSHOT'
           $un=@(Get-ChildItem -LiteralPath $install -Recurse -File -Filter 'Uninstall*.exe' -ErrorAction SilentlyContinue)
           if($un.Count -ne 1){throw 'NSIS_UNINSTALLER_NOT_FOUND'}
           $p=Start-Process -FilePath $un[0].FullName -ArgumentList '/S' -PassThru
