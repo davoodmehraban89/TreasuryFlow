@@ -147,6 +147,7 @@ jobs:
           }finally{
             if($desktop -and !$desktop.HasExited){& taskkill.exe /PID $desktop.Id /T /F *> $null}
           }
+          # Replay renderer/CDP under independent Windows Roaming APPDATA and LOCALAPPDATA; never inherit previous Electron Chromium lock.
           # Independently test the real installed Electron renderer and CDP
           # with isolated synthetic local database and no external bank access.
           for($probe=0;$probe -lt 40;$probe++){
