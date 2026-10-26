@@ -19,6 +19,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci --ignore-scripts
+      - run: node --check electron/main.cjs && node --check electron/ready-check.cjs
       - run: npm run typecheck
       - run: npm test
       - run: npm run lint
@@ -37,7 +38,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci --ignore-scripts
-      - run: npm run typecheck && npm run lint
+      - run: npm run typecheck && npm run lint && npm test -- --reporter=dot
       - run: npx --no-install vitest run src/platform/application/treasury-service-atomic-audit.test.ts
       - run: npm run build
       - run: node qa/scripts/production-http-security.mjs
