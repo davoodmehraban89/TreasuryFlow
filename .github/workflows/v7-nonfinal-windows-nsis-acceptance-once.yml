@@ -161,7 +161,16 @@ jobs:
           $nativeData=Join-Path $env:RUNNER_TEMP 'v7-native-cdp-synthetic'
           New-Item -ItemType Directory -Path $nativeData -Force | Out-Null
           & node $nativeTest $program[0].FullName $nativeData
-          if($LASTEXITCODE -ne 0){throw 'REAL_INSTALLED_ELECTRON_CDP_UI_ACCEPTANCE_FAILED'}
+          if($LASTEXITCODE -ne 0){
+            $reportFile=Join-Path $nativeData 'v7-native-cdp-qa.json'
+            if(Test-Path -LiteralPath $reportFile){
+              $failedNative=Get-Content -LiteralPath $reportFile -Raw | ConvertFrom-Json
+              Write-Host ('V7_CDP_SAFE_FAILED_STAGE='+([string]$failedNative.stage -replace '[^A-Za-z0-9_]',''))
+              Write-Host ('V7_CDP_LAUNCHER_EARLY_EXIT='+[bool]$failedNative.launcherExited)
+              Write-Host ('V7_CDP_PAGES_VERIFIED='+[int]@($failedNative.pages).Count)
+            }
+            throw 'REAL_INSTALLED_ELECTRON_CDP_UI_ACCEPTANCE_FAILED'
+          }
           $nativeResult=Get-Content -LiteralPath (Join-Path $nativeData 'v7-native-cdp-qa.json') -Raw | ConvertFrom-Json
           if($nativeResult.status -ne 'PASS' -or $nativeResult.pages.Count -ne 5 -or
              !$nativeResult.actualLocalClick -or !$nativeResult.bankDisabled -or !$nativeResult.screenshot){
