@@ -79,6 +79,37 @@ jobs:
             $nextRuntime=Join-Path $install 'resources/standalone/node_modules/next/package.json'
             Write-Host ('V7_PACKAGED_STANDALONE_SERVER_PRESENT='+[bool](Test-Path -LiteralPath $serverMain))
             Write-Host ('V7_PACKAGED_NEXT_RUNTIME_PRESENT='+[bool](Test-Path -LiteralPath $nextRuntime))
+            # Probe the very same bundled Next server without Electron before
+            # asserting desktop bootstrap. Never expose process output or data.
+            $env:NODE_ENV='production'
+            $env:HOSTNAME='127.0.0.1'
+            $env:PORT='3210'
+            $standaloneNode=Start-Process -FilePath 'node.exe' -ArgumentList @($serverMain) -WorkingDirectory (Split-Path $serverMain) -PassThru -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'nonfinal-direct-server-err.txt') -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'nonfinal-direct-server-out.txt')
+            try {
+              $nodeReady=$false
+              for($probe=0;$probe -lt 55;$probe++){
+                try {
+                  $nodeResult=Invoke-RestMethod -Uri 'http://127.0.0.1:3210/api/ready' -TimeoutSec 2
+                  if($nodeResult.status -eq 'ready' -and $nodeResult.bankAdapter -eq 'disabled'){
+                    $nodeReady=$true
+                    break
+                  }
+                }catch{}
+                if($standaloneNode.HasExited){break}
+                Start-Sleep -Milliseconds 400
+              }
+              Write-Host ('V7_PACKAGED_DIRECT_NODE_READY='+[bool]$nodeReady)
+              Write-Host ('V7_PACKAGED_DIRECT_NODE_EXITED='+[bool]$standaloneNode.HasExited)
+              if(!$nodeReady){throw 'BUNDLED_STANDALONE_SERVER_DIRECT_NODE_NOT_READY'}
+            }finally{
+              if(!$standaloneNode.HasExited){& taskkill.exe /PID $standaloneNode.Id /T /F *> $null}
+              for($probe=0;$probe -lt 20;$probe++){
+                $portOpen=@(Get-NetTCPConnection -LocalPort 3210 -State Listen -ErrorAction SilentlyContinue)
+                if($portOpen.Count -eq 0){break}
+                Start-Sleep -Milliseconds 250
+              }
+            }
+            Write-Host 'GATE_PASS_BUNDLED_STANDALONE_DIRECT_NODE_READY'
             $desktop=Start-Process -FilePath $program[0].FullName -PassThru -RedirectStandardError $diagnosticError -RedirectStandardOutput $diagnosticOut
             $ready=$null
             for($i=0;$i -lt 40;$i++){
