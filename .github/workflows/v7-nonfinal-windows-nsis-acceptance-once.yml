@@ -149,6 +149,12 @@ jobs:
           }
           # Independently test the real installed Electron renderer and CDP
           # with isolated synthetic local database and no external bank access.
+          for($probe=0;$probe -lt 40;$probe++){
+            $stillListening=@(Get-NetTCPConnection -LocalPort 3210 -State Listen -ErrorAction SilentlyContinue)
+            if($stillListening.Count -eq 0){break}
+            Start-Sleep -Milliseconds 250
+          }
+          if($stillListening.Count -gt 0){throw 'PREVIOUS_SYNTHETIC_DESKTOP_PROCESS_PORT_NOT_CLEARED'}
           $nativeTest=Join-Path $pwd 'qa/windows/v7-installed-native-cdp-smoke.mjs'
           & node --check $nativeTest
           if($LASTEXITCODE -ne 0){throw 'NATIVE_ELECTRON_CDP_TEST_SCRIPT_SYNTAX_FAILED'}
