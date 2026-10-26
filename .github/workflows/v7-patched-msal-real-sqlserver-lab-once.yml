@@ -1,0 +1,95 @@
+name: V7 patched MSAL transitive dependency real SQL Server least privilege regression
+on:
+  push:
+    paths:
+      - .github/workflows/v7-patched-msal-real-sqlserver-lab-once.yml
+permissions:
+  contents: read
+jobs:
+  mssql:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install and enforce patched transitive MSAL and zero production advisories
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-fund --no-audit >/dev/null
+          node - <<'NODE'
+          const pkg=require('./node_modules/@azure/msal-node/package.json');
+          if(pkg.version!=='7.1.1')throw Error('PATCHED_MSAL_LOCK_NOT_INSTALLED');
+          console.log('GATE_PASS_MSAL_7_1_1_ACTUALLY_INSTALLED');
+          NODE
+          npm audit --omit=dev --audit-level=low > "$RUNNER_TEMP/mssql-audit-private.log" 2>&1
+          echo GATE_PASS_SQL_DRIVER_ZERO_PRODUCTION_DEPENDENCY_ADVISORIES
+      - name: Start actual SQL Server 2022 engine with synthetic view-only login
+        shell: bash
+        run: |
+          set -euo pipefail
+          sa='A@'$(openssl rand -hex 18)'b3'
+          ro='R@'$(openssl rand -hex 18)'c4'
+          echo "::add-mask::$sa"
+          echo "::add-mask::$ro"
+          echo "TF_SQL_SYNTH_SA=$sa" >> "$GITHUB_ENV"
+          echo "TF_SQL_SYNTH_RO=$ro" >> "$GITHUB_ENV"
+          docker pull mcr.microsoft.com/mssql/server:2022-latest > "$RUNNER_TEMP/mssql-pull-private.log" 2>&1
+          docker run -d --name v7-synthetic-msal-sql -e ACCEPT_EULA=Y -e MSSQL_PID=Developer -e MSSQL_SA_PASSWORD="$sa" -p 127.0.0.1:1433:1433 mcr.microsoft.com/mssql/server:2022-latest > "$RUNNER_TEMP/mssql-container-private.log" 2>&1
+          good=false
+          for n in $(seq 1 95); do
+            if docker exec v7-synthetic-msal-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$sa" -C -b -Q 'SELECT 1;' > "$RUNNER_TEMP/mssql-ready-private.log" 2>&1; then good=true; break; fi
+            sleep 2
+          done
+          test "$good" = true
+          cat > "$RUNNER_TEMP/msal-sql-synthetic.sql" <<'SQL'
+          CREATE DATABASE TreasuryFlowMsalSafety;
+          GO
+          USE TreasuryFlowMsalSafety;
+          GO
+          CREATE TABLE dbo.SyntheticTransfers(Row_ID int PRIMARY KEY, Client_Reference varchar(64) NOT NULL, Amount_IRR bigint NOT NULL);
+          INSERT INTO dbo.SyntheticTransfers VALUES(1,'CI-SYNTHETIC-ONLY',1250000);
+          GO
+          CREATE VIEW dbo.vw_ReadOnlyTransfers AS SELECT Row_ID, Client_Reference, Amount_IRR FROM dbo.SyntheticTransfers;
+          GO
+          SQL
+          docker cp "$RUNNER_TEMP/msal-sql-synthetic.sql" v7-synthetic-msal-sql:/tmp/v7sql.sql
+          docker exec v7-synthetic-msal-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$sa" -C -b -i /tmp/v7sql.sql > "$RUNNER_TEMP/mssql-init-private.log" 2>&1
+          docker exec v7-synthetic-msal-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$sa" -C -b -Q "CREATE LOGIN [tf_v7_synthetic_reader] WITH PASSWORD=N'$ro';" > "$RUNNER_TEMP/mssql-setup-private.log" 2>&1
+          docker exec v7-synthetic-msal-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$sa" -C -b -d TreasuryFlowMsalSafety -Q 'CREATE USER tf_v7_synthetic_reader FOR LOGIN tf_v7_synthetic_reader; GRANT SELECT ON dbo.vw_ReadOnlyTransfers TO tf_v7_synthetic_reader;' > "$RUNNER_TEMP/mssql-grants-private.log" 2>&1
+          echo GATE_PASS_REAL_SQL2022_TEMPORARY_SYNTHETIC_VIEW_CREATED
+      - name: Confirm patched driver reads approved SQL view, denies writes and base table reads
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const assert=require('node:assert/strict'),sql=require('mssql');
+          (async()=>{
+            const pool=await sql.connect({user:'tf_v7_synthetic_reader',password:process.env.TF_SQL_SYNTH_RO,
+              server:'127.0.0.1',database:'TreasuryFlowMsalSafety',
+              options:{encrypt:false,trustServerCertificate:true},
+              pool:{max:2,min:0,idleTimeoutMillis:1000}});
+            try{
+              const rows=(await pool.request().query('SELECT Row_ID,Client_Reference,Amount_IRR FROM dbo.vw_ReadOnlyTransfers')).recordset;
+              assert.equal(rows.length,1);
+              assert.equal(rows[0].Client_Reference,'CI-SYNTHETIC-ONLY');
+              assert.equal(rows[0].Amount_IRR,1250000);
+              console.log('GATE_PASS_PATCHED_MSAL_MSSQL_DRIVER_REAL_VIEW_READ_INTEGER_IRR');
+              for(const statement of [
+                "UPDATE dbo.SyntheticTransfers SET Amount_IRR=1 WHERE Row_ID=1",
+                "DELETE FROM dbo.SyntheticTransfers WHERE Row_ID=1",
+                "SELECT * FROM dbo.SyntheticTransfers",
+                "DROP VIEW dbo.vw_ReadOnlyTransfers"
+              ])await assert.rejects(pool.request().query(statement));
+              console.log('GATE_PASS_REAL_SQL2022_VIEW_ONLY_LOGIN_DENIES_WRITES_AND_BASE_TABLE');
+            }finally{await pool.close()}
+          })().catch(e=>{console.log('SQL_DRIVER_SYNTHETIC_FAIL_'+String(e?.name||'UNKNOWN').replace(/[^A-Za-z]/g,''));process.exitCode=1});
+          NODE
+      - name: Safe-only status
+        if: always()
+        shell: bash
+        run: echo NO_REAL_MAYAN_OR_BANK_NO_SECRETS_OR_PRIVATE_SOURCE_UPLOADED
