@@ -48,6 +48,9 @@ jobs:
           $ErrorActionPreference='Stop'
           npm run build
           if($LASTEXITCODE -ne 0){throw 'CI_NEXT_BUILD_FAILED'}
+          $sourceRuntime=Join-Path $pwd '.next/standalone/node_modules/next/package.json'
+          if(!(Test-Path -LiteralPath $sourceRuntime)){throw 'NEXT_STANDALONE_TRACE_RUNTIME_MISSING_BEFORE_PACKAGING'}
+          Write-Host 'GATE_PASS_NEXT_STANDALONE_SOURCE_RUNTIME_PRESENT'
           node scripts/prepare-standalone.mjs
           if($LASTEXITCODE -ne 0){throw 'CI_STANDALONE_FAILED'}
           $env:CSC_IDENTITY_AUTO_DISCOVERY='false'
@@ -55,6 +58,9 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'CI_NONFINAL_NSIS_PACKAGING_FAILED'}
           $exe=@(Get-ChildItem -LiteralPath (Join-Path $pwd 'release') -File -Filter '*.exe')
           if($exe.Count -ne 1 -or $exe[0].Length -lt 1000000){throw 'CI_NONFINAL_NSIS_SINGLE_EXE_NOT_FOUND'}
+          $unpackedRuntime=Join-Path $pwd 'release/win-unpacked/resources/standalone/node_modules/next/package.json'
+          if(!(Test-Path -LiteralPath $unpackedRuntime)){throw 'NEXT_STANDALONE_NODE_MODULES_OMITTED_BY_ELECTRON_BUILDER'}
+          Write-Host 'GATE_PASS_NEXT_RUNTIME_EXPLICITLY_PRESENT_IN_NSIS_UNPACKED_RESOURCES'
           Write-Host 'GATE_PASS_NONFINAL_V7_BRANCH_NSIS_BUILT'
       - name: Install exact NSIS setup and verify desktop on real Windows
         shell: pwsh
