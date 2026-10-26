@@ -23,11 +23,18 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF_NAME" = 'dev/v7-production-failclosed-20261021'
           npm ci --ignore-scripts --no-audit --no-fund >/dev/null
-          npm audit fix --package-lock-only --no-fund > "$RUNNER_TEMP/npm-security-patch.log" 2>&1 || {
-            echo 'GATE_FAIL_LOCKFILE_SECURITY_PATCH'
+          # @azure/identity 4.14 depends on MSAL ^6.0.0, but the vendor's
+          # security patch is MSAL 7.1.0+. Explicit override is required.
+          npm pkg set 'overrides.@azure/msal-node=7.1.1'
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund > "$RUNNER_TEMP/npm-security-patch.log" 2>&1 || {
+            echo 'GATE_FAIL_EXPLICIT_MSAL_OVERRIDE_LOCK_RESOLUTION'
             exit 1
           }
-          git diff --exit-code -- package.json
+          node - <<'NODE'
+          const pkg=require('./package.json');
+          if(pkg.overrides?.['@azure/msal-node']!=='7.1.1')throw Error('MSAL_OVERRIDE_NOT_PINNED');
+          console.log('GATE_PASS_EXPLICIT_MSAL_7_1_1_OVERRIDE_PINNED');
+          NODE
           node - <<'NODE'
           const lock=require('./package-lock.json');
           const dependency=lock.packages?.['node_modules/@azure/msal-node'];
@@ -56,14 +63,14 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF_NAME" = 'dev/v7-production-failclosed-20261021'
-          test -z "$(git status --porcelain --untracked-files=no | grep -v 'package-lock.json' || true)"
-          if git diff --quiet -- package-lock.json; then
+          test -z "$(git status --porcelain --untracked-files=no | grep -Ev 'package(-lock)?.json' || true)"
+          if git diff --quiet -- package.json package-lock.json; then
             echo 'GATE_PASS_LOCKFILE_ALREADY_SECURE'
           else
             git config user.name "TreasuryFlow CI security bot"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -- package-lock.json
-            git commit -m 'fix: resolve MSAL Node high-severity transitive advisory in lockfile'
+            git add -- package.json package-lock.json
+            git commit -m 'fix: pin patched MSAL Node transitively and validate finance suite'
             git push origin HEAD:refs/heads/dev/v7-production-failclosed-20261021
-            echo 'GATE_PASS_VALIDATED_LOCKFILE_COMMITTED_ON_FEATURE_BRANCH'
+            echo 'GATE_PASS_VALIDATED_MSA_LOWER_BOUND_COMMITTED_ON_FEATURE_BRANCH'
           fi
