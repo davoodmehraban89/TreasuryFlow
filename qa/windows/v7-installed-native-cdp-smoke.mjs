@@ -86,8 +86,12 @@ async function go(path,heading){
 }
 try{
  const separateUserData=join(fixtureDir,'isolated-electron-localappdata');
+ const roamingUserData=join(fixtureDir,'isolated-electron-roaming-appdata');
  mkdirSync(separateUserData,{recursive:true});
- const env={...process.env,LOCALAPPDATA:separateUserData,TREASURYFLOW_DESKTOP_LOCAL:'1',BANK_ADAPTER_MODE:'disabled',
+ mkdirSync(roamingUserData,{recursive:true});
+ // Electron userData on Windows defaults to APPDATA (Roaming), not LOCALAPPDATA.
+ // Both must be isolated after force-killing the preceding synthetic launcher.
+ const env={...process.env,LOCALAPPDATA:separateUserData,APPDATA:roamingUserData,TREASURYFLOW_DESKTOP_LOCAL:'1',BANK_ADAPTER_MODE:'disabled',
    TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ:'0',TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ:'0',
    TREASURYFLOW_ENABLE_SQL_LAB:'0',
    TREASURYFLOW_DATA_FILE:join(fixtureDir,'synthetic-v7-ui.sqlite')};
