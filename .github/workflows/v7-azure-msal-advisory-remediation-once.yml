@@ -1,0 +1,69 @@
+name: V7 fix transitive MSAL advisory on isolated branch
+on:
+  push:
+    paths:
+      - .github/workflows/v7-azure-msal-advisory-remediation-once.yml
+permissions:
+  contents: write
+jobs:
+  remediation:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Re-resolve only lock file against current npm advisories
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'dev/v7-production-failclosed-20261021'
+          npm ci --ignore-scripts --no-audit --no-fund >/dev/null
+          npm audit fix --package-lock-only --no-fund > "$RUNNER_TEMP/npm-security-patch.log" 2>&1 || {
+            echo 'GATE_FAIL_LOCKFILE_SECURITY_PATCH'
+            exit 1
+          }
+          git diff --exit-code -- package.json
+          node - <<'NODE'
+          const lock=require('./package-lock.json');
+          const dependency=lock.packages?.['node_modules/@azure/msal-node'];
+          if(!dependency)throw Error('MSAL_LOCK_ENTRY_MISSING');
+          const v=dependency.version.split('.').map(Number);
+          if(v[0]<7||(v[0]===7&&v[1]<1))throw Error('MSAL_LOCK_VERSION_UNPATCHED');
+          console.log('GATE_PASS_PATCHED_MSAL_VERSION_AT_LEAST_7_1_0');
+          NODE
+      - name: Fresh install plus full core gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund > "$RUNNER_TEMP/npm-ci.log" 2>&1
+          npm audit --omit=dev --audit-level=low > "$RUNNER_TEMP/npm-audit.log" 2>&1 || {
+            echo 'GATE_FAIL_PRODUCTION_ADVISORIES_REMAIN'
+            exit 1
+          }
+          npm run typecheck > "$RUNNER_TEMP/types.log" 2>&1
+          npm run lint > "$RUNNER_TEMP/lint.log" 2>&1
+          npm test -- --reporter=dot > "$RUNNER_TEMP/tests.log" 2>&1
+          npm run build > "$RUNNER_TEMP/build.log" 2>&1
+          npm run smoke > "$RUNNER_TEMP/smoke.log" 2>&1
+          echo 'GATE_PASS_MSal_ADVISORY_ZERO_PRODUCTION_AUDIT_FULL_FINANCE_BUILD_SMOKE'
+      - name: Commit only validated dependency lock repair to isolated branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'dev/v7-production-failclosed-20261021'
+          test -z "$(git status --porcelain --untracked-files=no | grep -v 'package-lock.json' || true)"
+          if git diff --quiet -- package-lock.json; then
+            echo 'GATE_PASS_LOCKFILE_ALREADY_SECURE'
+          else
+            git config user.name "TreasuryFlow CI security bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -- package-lock.json
+            git commit -m 'fix: resolve MSAL Node high-severity transitive advisory in lockfile'
+            git push origin HEAD:refs/heads/dev/v7-production-failclosed-20261021
+            echo 'GATE_PASS_VALIDATED_LOCKFILE_COMMITTED_ON_FEATURE_BRANCH'
+          fi
