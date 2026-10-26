@@ -68,5 +68,8 @@
             "output": "release"
         },
         "artifactName": "TreasuryFlow-${version}-Windows-${arch}.${ext}"
+    },
+    "overrides": {
+        "@azure/msal-node": "7.1.1"
     }
 }
