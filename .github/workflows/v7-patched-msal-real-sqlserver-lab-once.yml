@@ -77,7 +77,10 @@ jobs:
               const rows=(await pool.request().query('SELECT Row_ID,Client_Reference,Amount_IRR FROM dbo.vw_ReadOnlyTransfers')).recordset;
               assert.equal(rows.length,1);
               assert.equal(rows[0].Client_Reference,'CI-SYNTHETIC-ONLY');
-              assert.equal(rows[0].Amount_IRR,1250000);
+              // SQL BIGINT is intentionally preserved as a decimal string
+              // by mssql to avoid loss of precision above Number.MAX_SAFE_INTEGER.
+              assert.equal(String(rows[0].Amount_IRR),'1250000');
+              assert.match(String(rows[0].Amount_IRR),/^[0-9]+$/);
               console.log('GATE_PASS_PATCHED_MSAL_MSSQL_DRIVER_REAL_VIEW_READ_INTEGER_IRR');
               for(const statement of [
                 "UPDATE dbo.SyntheticTransfers SET Amount_IRR=1 WHERE Row_ID=1",
