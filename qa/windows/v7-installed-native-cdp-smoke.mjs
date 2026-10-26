@@ -21,7 +21,7 @@ async function connect(target){
  await new Promise((ok,fail)=>{
    const timer=setTimeout(()=>fail(Error('CDP_CONNECT_TIMEOUT')),10000);
    ws.addEventListener('open',()=>{clearTimeout(timer);ok()},{once:true});
-   ws.addEventListener('error',()=>{clearTimeout(timer);fail(Error('CDP_CONNECT_ERROR')),{once:true}});
+   ws.addEventListener('error',()=>{clearTimeout(timer);fail(Error('CDP_CONNECT_ERROR'));},{once:true});
  });
  let id=0;const pending=new Map();
  ws.addEventListener('message',message=>{
