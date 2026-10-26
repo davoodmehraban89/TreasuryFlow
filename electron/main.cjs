@@ -2,28 +2,60 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const http = require('node:http');
+const { isExpectedReadiness } = require('./ready-check.cjs');
 
 let serverProcess;
+let serverStartError = null;
 const PORT = 3210;
 
-function waitForServer(url, timeoutMs = 30000) {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const attempt = () => {
-      const req = http.get(url, res => {
-        res.resume();
-        if (res.statusCode && res.statusCode < 500) return resolve();
-        retry();
+function probeReadiness(url) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = value => {
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    };
+    const req = http.get(url, res => {
+      const parts = [];
+      let bytes = 0;
+      res.on('data', chunk => {
+        bytes += chunk.length;
+        if (bytes > 4096) {
+          req.destroy();
+          finish(false);
+        } else {
+          parts.push(chunk);
+        }
       });
-      req.on('error', retry);
-      req.setTimeout(1500, () => { req.destroy(); retry(); });
-    };
-    const retry = () => {
-      if (Date.now() - started > timeoutMs) return reject(new Error('TreasuryFlow local server did not start'));
-      setTimeout(attempt, 300);
-    };
-    attempt();
+      res.on('end', () => finish(isExpectedReadiness(res.statusCode, Buffer.concat(parts).toString('utf8'))));
+      res.on('error', () => finish(false));
+    });
+    req.on('error', () => finish(false));
+    req.setTimeout(1500, () => {
+      req.destroy();
+      finish(false);
+    });
   });
+}
+
+async function waitForServer(url, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (serverStartError || !serverProcess ||
+        serverProcess.exitCode !== null || serverProcess.signalCode !== null) {
+      throw new Error('TreasuryFlow local server exited before readiness');
+    }
+    if (await probeReadiness(url)) {
+      if (serverStartError || serverProcess.exitCode !== null || serverProcess.signalCode !== null) {
+        throw new Error('TreasuryFlow local server exited during readiness');
+      }
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  throw new Error('TreasuryFlow local server did not reach authenticated application readiness');
 }
 
 function serverPath() {
@@ -33,10 +65,12 @@ function serverPath() {
 
 async function startServer() {
   const script = serverPath();
+  // Expose bounded diagnostic stderr only in a synthetic-data Windows VM.
+  const vmDiagnostics = process.env.TREASURYFLOW_VM_DIAGNOSTICS === '1';
   serverProcess = spawn(process.execPath, [script], {
     cwd: path.dirname(script),
     windowsHide: true,
-    stdio: 'ignore',
+    stdio: vmDiagnostics ? ['ignore', 'ignore', 'pipe'] : 'ignore',
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
@@ -47,7 +81,20 @@ async function startServer() {
       BANK_ADAPTER_MODE: 'disabled'
     }
   });
+  let childStderr = '';
+  if (vmDiagnostics && serverProcess.stderr) {
+    serverProcess.stderr.on('data', chunk => {
+      childStderr = (childStderr + chunk.toString('utf8')).slice(-2400);
+    });
+  }
+  serverProcess.on('error', err => { serverStartError = err; });
   serverProcess.on('exit', code => {
+    if (vmDiagnostics && childStderr) {
+      const scrubbed = childStderr
+        .replace(/\b(password|token|secret|credential|authorization|api[_-]?key)\s*[:=]\s*\S+/gi, '$1=[REDACTED]')
+        .replace(/https?:\/\/[^@\s]+@/gi, 'https://[REDACTED]@');
+      console.error('TreasuryFlow child stderr (sanitized):', scrubbed);
+    }
     if (!app.isQuitting && code !== 0) console.error('TreasuryFlow server exited', code);
   });
   await waitForServer(`http://127.0.0.1:${PORT}/api/ready`);
