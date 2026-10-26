@@ -46,7 +46,10 @@ async function connect(target){
 async function until(fn,timeoutMs=65000){
  const stop=Date.now()+timeoutMs;let latest;
  while(Date.now()<stop){
-   if(app?.exitCode!==null&&app?.exitCode!==undefined)throw Error('ELECTRON_EXITED');
+   // On Windows, the launcher PID may exit after handing off to a renderer.
+   // Require actual localhost readiness and CDP instead of equating launcher
+   // lifecycle with failure. The test deadline remains bounded.
+   if(app?.exitCode!==null&&app?.exitCode!==undefined)report.launcherExited=true;
    try{const outcome=await fn();if(outcome)return outcome}catch(e){latest=e}
    await sleep(350);
  }
@@ -82,7 +85,9 @@ async function go(path,heading){
  },65000);
 }
 try{
- const env={...process.env,TREASURYFLOW_DESKTOP_LOCAL:'1',BANK_ADAPTER_MODE:'disabled',
+ const separateUserData=join(fixtureDir,'isolated-electron-localappdata');
+ mkdirSync(separateUserData,{recursive:true});
+ const env={...process.env,LOCALAPPDATA:separateUserData,TREASURYFLOW_DESKTOP_LOCAL:'1',BANK_ADAPTER_MODE:'disabled',
    TREASURYFLOW_ENABLE_MAYAN_EXTERNAL_READ:'0',TREASURYFLOW_MAYAN_ENABLE_EXTERNAL_READ:'0',
    TREASURYFLOW_ENABLE_SQL_LAB:'0',
    TREASURYFLOW_DATA_FILE:join(fixtureDir,'synthetic-v7-ui.sqlite')};
@@ -123,6 +128,8 @@ try{
 }catch(e){
  report.status='FAIL';
  report.error=String(e?.message||'UNKNOWN').replace(/[^A-Z0-9_]/gi,'_').slice(0,90);
+ report.launcherExitCode=Number.isInteger(app?.exitCode)?app.exitCode:null;
+ report.cdpAttempts=report.reconnections;
  console.log('V7_NATIVE_CDP_FAILURE_CLASS_'+report.error);
  process.exitCode=1;
 }finally{
