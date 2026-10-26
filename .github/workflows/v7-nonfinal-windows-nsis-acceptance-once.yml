@@ -36,6 +36,9 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'CI_TYPESCRIPT_FAILED'}
           npm run lint
           if($LASTEXITCODE -ne 0){throw 'CI_LINT_FAILED'}
+          $secureMsal=Get-Content package.json -Raw | ConvertFrom-Json
+          if($secureMsal.overrides.'@azure/msal-node' -ne '7.1.1'){throw 'MSAL_SECURITY_OVERRIDE_NOT_PINNED'}
+          Write-Host 'GATE_PASS_PINNED_CVE_2026_109461_MSAL_REMEDIATION'
           npm audit --omit=dev --audit-level=low
           if($LASTEXITCODE -ne 0){throw 'CI_PRODUCTION_NPM_ADVISORY'}
           Write-Host 'GATE_PASS_V7_BRANCH_WINDOWS_TEST_TYPECHECK_LINT_ZERO_PRODUCTION_AUDIT'
